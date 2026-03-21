@@ -1,0 +1,133 @@
+import { renderExtensionTemplateAsync } from '../../../extensions.js';
+import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
+import { clearExtensionPrompt, getSettings, initializeSettings, setSettings } from './core/settings.js';
+import { getChatState, saveChatState, ensureChatState, getActiveChatId } from './core/storage.js';
+import { registerEventHooks } from './runtime/event-hooks.js';
+import { runGenerationInterceptor } from './runtime/generation-hook.js';
+import { processCompletedTurn } from './runtime/postgen-hook.js';
+import { renderPanel } from './ui/panel.js';
+import { registerSlashCommands } from './commands/slash.js';
+
+export const EXTENSION_NAME = 'anchor-memory';
+export const EXTENSION_FOLDER = `third-party/${EXTENSION_NAME}`;
+let initialized = false;
+
+export async function initAnchorMemory() {
+    if (initialized) {
+        renderPanel(getSettings());
+        return getSettings();
+    }
+    initialized = true;
+
+    initializeSettings();
+    const settings = getSettings();
+    registerEventHooks({
+        onBeforeGenerate: runGenerationInterceptor,
+        onAfterGenerate: processCompletedTurn,
+    });
+
+    if (!document.getElementById('anchor_memory_settings')) {
+        const settingsHtml = $(await renderExtensionTemplateAsync(EXTENSION_FOLDER, 'settings'));
+        $('#extensions_settings').append(settingsHtml);
+    }
+    renderPanel(settings);
+    bindUi();
+    bindRuntimeEvents();
+    registerSlashCommands();
+    ensureActiveChatState();
+
+    if (typeof window !== 'undefined') {
+        window.AnchorMemory = {
+            clearPrompt: () => clearExtensionPrompt(),
+            getChatState,
+            getSettings,
+            initAnchorMemory,
+            processCompletedTurn,
+            saveChatState,
+            setSettings,
+        };
+    }
+
+    return settings;
+}
+
+function bindUi() {
+    const settings = getSettings();
+    $('#am_enabled').prop('checked', settings.enabled);
+    $('#am_preserve_recent_messages').val(settings.preserveRecentMessages);
+    $('#am_max_episodes').val(settings.maxEpisodesInjected);
+    $('#am_scene_threshold').val(settings.sceneMessageThreshold);
+    $('#am_prompt_position').val(settings.promptPosition);
+    $('#am_prompt_depth').val(settings.promptDepth);
+
+    $('#am_enabled').off('change').on('change', function () {
+        updateSettings({ enabled: $(this).prop('checked') });
+        if (!$(this).prop('checked')) {
+            clearExtensionPrompt();
+            renderPanel(getSettings());
+        }
+    });
+
+    $('#am_preserve_recent_messages').off('input').on('input', function () {
+        updateSettings({ preserveRecentMessages: toPositiveInt($(this).val(), 12) });
+    });
+
+    $('#am_max_episodes').off('input').on('input', function () {
+        updateSettings({ maxEpisodesInjected: toPositiveInt($(this).val(), 3) });
+    });
+
+    $('#am_scene_threshold').off('input').on('input', function () {
+        updateSettings({ sceneMessageThreshold: toPositiveInt($(this).val(), 14) });
+    });
+
+    $('#am_prompt_position').off('change').on('change', function () {
+        updateSettings({ promptPosition: String($(this).val() || 'in_chat') });
+    });
+
+    $('#am_prompt_depth').off('input').on('input', function () {
+        updateSettings({ promptDepth: toPositiveInt($(this).val(), 1) });
+    });
+}
+
+function bindRuntimeEvents() {
+    eventSource.on(event_types.CHAT_CHANGED, () => {
+        ensureActiveChatState();
+        renderPanel(getSettings());
+    });
+
+    eventSource.on(event_types.MESSAGE_RECEIVED, async (_messageId, type) => {
+        await processCompletedTurn({ type });
+        renderPanel(getSettings());
+    });
+
+    eventSource.on(event_types.GENERATION_STOPPED, () => {
+        if (!getSettings().enabled) {
+            clearExtensionPrompt();
+        }
+    });
+}
+
+function ensureActiveChatState() {
+    ensureChatState(getActiveChatId());
+}
+
+function updateSettings(next) {
+    setSettings(next);
+    saveSettingsDebounced();
+    renderPanel(getSettings());
+}
+
+function toPositiveInt(value, fallback) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+    return Math.round(parsed);
+}
+
+if (typeof window !== 'undefined') {
+    window.AnchorMemoryBootstrap = initAnchorMemory;
+    window.anchor_memory_intercept = (...args) => runGenerationInterceptor(...args);
+}
+
+jQuery(async () => {
+    await initAnchorMemory();
+});

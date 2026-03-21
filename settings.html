@@ -1,0 +1,56 @@
+<div id="anchor_memory_settings" class="am-container">
+  <div class="am-header">
+    <h3>Anchor Memory</h3>
+    <p>Practical RP memory for current scene continuity and episode recall.</p>
+  </div>
+
+  <div class="am-card">
+    <label>
+      <input id="am_enabled" type="checkbox" checked />
+      Enable Anchor Memory
+    </label>
+  </div>
+
+  <div class="am-card">
+    <h4>Retrieval</h4>
+    <label class="am-field">
+      <span>Preserve recent messages</span>
+      <input id="am_preserve_recent_messages" type="number" min="1" step="1" />
+    </label>
+    <label class="am-field">
+      <span>Max episodes</span>
+      <input id="am_max_episodes" type="number" min="1" step="1" />
+    </label>
+    <label class="am-field">
+      <span>Scene threshold</span>
+      <input id="am_scene_threshold" type="number" min="1" step="1" />
+    </label>
+    <label class="am-field">
+      <span>Prompt position</span>
+      <select id="am_prompt_position">
+        <option value="in_chat">In Chat</option>
+        <option value="in_prompt">In Prompt</option>
+        <option value="before_prompt">Before Prompt</option>
+      </select>
+    </label>
+    <label class="am-field">
+      <span>Prompt depth</span>
+      <input id="am_prompt_depth" type="number" min="0" step="1" />
+    </label>
+  </div>
+
+  <div class="am-card">
+    <h4>Current Status</h4>
+    <pre id="am_status" class="am-pre">Loading...</pre>
+  </div>
+
+  <div class="am-card">
+    <h4>Last Selection</h4>
+    <pre id="am_last_selection" class="am-pre">(none)</pre>
+  </div>
+
+  <div class="am-card">
+    <h4>Prompt Preview</h4>
+    <pre id="am_last_injection" class="am-pre">(none)</pre>
+  </div>
+</div>

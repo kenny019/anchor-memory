@@ -1,0 +1,12 @@
+{
+  "display_name": "Anchor Memory",
+  "loading_order": 60,
+  "requires": [],
+  "optional": [],
+  "generate_interceptor": "anchor_memory_intercept",
+  "js": "index.js",
+  "css": "style.css",
+  "author": "OpenAI Codex",
+  "version": "0.1.0",
+  "description": "Practical RP memory scaffold for SillyTavern with state cards, episode memory, and deterministic retrieval."
+}

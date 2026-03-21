@@ -1,0 +1,36 @@
+.am-container {
+  padding: 12px;
+}
+
+.am-header h3,
+.am-card h4 {
+  margin: 0 0 8px;
+}
+
+.am-card {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+}
+
+.am-field {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.am-field input,
+.am-field select {
+  min-width: 120px;
+}
+
+.am-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}

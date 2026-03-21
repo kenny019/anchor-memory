@@ -1,0 +1,40 @@
+function tokenize(text) {
+    return String(text || '')
+        .toLowerCase()
+        .replace(/[^\w\s]/g, ' ')
+        .split(/\s+/)
+        .filter(token => token && token.length > 2);
+}
+
+export function buildQueryContext({
+    recentMessages = [],
+    sceneCard = null,
+} = {}) {
+    const recentText = recentMessages
+        .slice(-3)
+        .map(message => String(message?.text || message?.mes || ''))
+        .join(' ');
+
+    const normalizedSceneCard = sceneCard || {};
+    const sceneParticipants = Array.isArray(normalizedSceneCard.participants) ? normalizedSceneCard.participants : [];
+    const openThreads = Array.isArray(normalizedSceneCard.openThreads) ? normalizedSceneCard.openThreads : [];
+    const stateText = [
+        normalizedSceneCard.location,
+        normalizedSceneCard.timeContext,
+        normalizedSceneCard.activeGoal,
+        normalizedSceneCard.activeConflict,
+        ...sceneParticipants,
+        ...openThreads,
+    ].filter(Boolean).join(' ');
+
+    const terms = [...new Set([...tokenize(recentText), ...tokenize(stateText)])];
+
+    return {
+        location: String(normalizedSceneCard.location || ''),
+        openThreads,
+        recentText,
+        sceneParticipants,
+        stateText,
+        terms,
+    };
+}

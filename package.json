@@ -1,0 +1,10 @@
+{
+  "name": "anchor-memory",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Practical RP memory extension scaffold for SillyTavern.",
+  "type": "module",
+  "scripts": {
+    "check": "find . -name '*.js' -print0 | xargs -0 -n1 node --check"
+  }
+}
