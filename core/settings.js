@@ -52,21 +52,23 @@ export function getDefaultSettings() {
     return structuredClone(DEFAULT_SETTINGS);
 }
 
-export function initializeSettings() {
+function ensureDefaults() {
     extension_settings[EXTENSION_NAME] = extension_settings[EXTENSION_NAME] || {};
     const settings = extension_settings[EXTENSION_NAME];
-
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
         if (settings[key] === undefined || settings[key] === null) {
             settings[key] = structuredClone(value);
         }
     }
+}
 
-    return getSettings();
+export function initializeSettings() {
+    ensureDefaults();
+    return structuredClone(extension_settings[EXTENSION_NAME]);
 }
 
 export function getSettings() {
-    initializeSettings();
+    ensureDefaults();
     return structuredClone(extension_settings[EXTENSION_NAME]);
 }
 
