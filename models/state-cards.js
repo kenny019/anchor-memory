@@ -83,13 +83,17 @@ export function mergeSceneCard(existingSceneCard, partialSceneCard, meta = {}) {
     const existing = normalizeSceneCard(existingSceneCard);
     const incoming = normalizeSceneCard(partialSceneCard);
 
+    // LLM extraction replaces threads entirely (it sees enough context to know what's active).
+    // Heuristic extraction merges to avoid losing threads from previous windows.
+    const replaceThreads = Boolean(meta.replaceThreads);
+
     const merged = {
         location: incoming.location || existing.location,
         timeContext: incoming.timeContext || existing.timeContext,
         activeGoal: incoming.activeGoal || existing.activeGoal,
         activeConflict: incoming.activeConflict || existing.activeConflict,
         openThreads: incoming.openThreads.length > 0
-            ? uniqueStrings([...incoming.openThreads, ...existing.openThreads], 8)
+            ? (replaceThreads ? uniqueStrings(incoming.openThreads, 8) : uniqueStrings([...incoming.openThreads, ...existing.openThreads], 8))
             : existing.openThreads,
         participants: incoming.participants.length > 0
             ? uniqueStrings(incoming.participants, 8)

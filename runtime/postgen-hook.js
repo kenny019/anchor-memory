@@ -5,6 +5,7 @@ import { hasEpisodeSpan, EPISODE_TYPE } from '../models/episodes.js';
 import { hasSceneCardContent, mergeSceneCard } from '../models/state-cards.js';
 import { extractStateUpdates } from '../writing/extract-state.js';
 import { extractStateWindowed } from '../writing/windowed-extractor.js';
+import { llmExtractScene } from '../writing/llm-extract-state.js';
 import { buildEpisodeCandidate } from '../writing/build-episode.js';
 import { consolidateEpisodes, applyConsolidation } from '../writing/consolidate-episodes.js';
 import { createLLMCaller } from '../llm/api.js';
@@ -53,24 +54,15 @@ export async function processCompletedTurn({
         };
     }
 
-    const sceneUpdate = resolvedSettings.windowedExtraction
-        ? extractStateWindowed({
-            recentMessages: normalizedMessages,
-            chatState: resolvedChatState,
-            windowSize: Number(resolvedSettings.extractionWindowSize) || 8,
-            overlap: Number(resolvedSettings.extractionWindowOverlap) || 3,
-        })
-        : extractStateUpdates({
-            chatState: resolvedChatState,
-            recentMessages: normalizedMessages,
-            latestAssistantMessage: finalAssistantMessage,
-        });
+    const useLLMExtraction = Boolean(resolvedSettings.memoryModelSource && resolvedSettings.memoryModel);
+    const sceneUpdate = await extractSceneState(useLLMExtraction, normalizedMessages, resolvedChatState, resolvedSettings, finalAssistantMessage);
     const nextSceneCard = mergeSceneCard(
         resolvedChatState.sceneCard,
         sceneUpdate,
         {
             updatedAtMessageId: finalAssistantMessage.id,
             updatedAtTs: Date.now(),
+            replaceThreads: useLLMExtraction,
         },
     );
 
@@ -135,6 +127,23 @@ export async function processCompletedTurn({
         episodeCandidate,
         safeUpdates: hasSceneCardContent(nextSceneCard) ? [nextSceneCard] : [],
     };
+}
+
+async function extractSceneState(useLLM, messages, chatState, settings, latestAssistantMessage) {
+    if (useLLM) {
+        const result = await llmExtractScene({ recentMessages: messages, chatState, llmCallFn: createLLMCaller(settings) });
+        if (result) return result;
+        console.warn('[AnchorMemory] LLM extraction failed, falling back to heuristic');
+    }
+    if (settings.windowedExtraction) {
+        return extractStateWindowed({
+            recentMessages: messages,
+            chatState,
+            windowSize: Number(settings.extractionWindowSize) || 8,
+            overlap: Number(settings.extractionWindowOverlap) || 3,
+        });
+    }
+    return extractStateUpdates({ chatState, recentMessages: messages, latestAssistantMessage });
 }
 
 function findLatestAssistantMessage(messages) {
