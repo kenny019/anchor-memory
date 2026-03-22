@@ -83,13 +83,13 @@ Works out of the box with zero cost:
 
 ### Enhanced (cheap LLM calls)
 
-Point Anchor Memory at a cheap model (like `gpt-4o-mini` via OpenRouter) for smarter memory:
+Point Anchor Memory at a cheap model (like `openai/gpt-5.4-nano` via OpenRouter) for smarter memory:
 
 - **LLM Retrieval** — replaces keyword scoring with narrative-aware retrieval. Finds "the time she betrayed us" even if those exact words aren't in the episode.
 - **LLM Summarization** — creates richer episode summaries that preserve character details, relationships, and causal connections.
 - **Episode Consolidation** — merges old related episodes into compact semantic memories when your episode count grows.
 
-Cost is negligible: roughly **$0.003 per 600-message chat** on `gpt-4o-mini`.
+Cost is negligible: roughly **$0.003 per 600-message chat** on `openai/gpt-5.4-nano`.
 
 ## Benchmark Results
 
@@ -134,7 +134,7 @@ The best configuration (LLM episodes + hybrid retrieval) achieves **90.9% accura
 | Setting | Default | What it does |
 |---|---|---|
 | **Model source** | (empty) | API provider (e.g. `openai`, `openrouter`) |
-| **Model ID** | (empty) | Model to use (e.g. `gpt-4o-mini`) |
+| **Model ID** | (empty) | Model to use (e.g. `openai/gpt-5.4-nano`) |
 | **LLM Retrieval** | Off | Use LLM for narrative-aware memory retrieval |
 | **LLM Summarization** | Off | Use LLM for richer episode summaries |
 
