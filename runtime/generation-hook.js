@@ -86,6 +86,7 @@ export async function prepareGenerationMemory({
         episodes: selected.episodes,
         maxChars: Number(settings.maxInjectedChars) || 4000,
         sceneCard: selected.sceneCard,
+        format: settings.memoryFormat || 'text',
     });
 
     return {
@@ -117,11 +118,17 @@ export async function runGenerationInterceptor(chat = [], _contextSize, _abort, 
     const preserveRecent = Number(settings.preserveRecentMessages) || 12;
     const allNormalized = normalizeRecentMessages(chat);
     const recentMessages = allNormalized.slice(-preserveRecent);
+
+    // Budget-aware: scale maxChars based on chat length as context proxy
+    const configuredMax = Number(settings.maxInjectedChars) || 4000;
+    const effectiveMax = chat.length < 30 ? Math.min(configuredMax, 2000) : configuredMax;
+    const effectiveSettings = { ...settings, maxInjectedChars: effectiveMax };
+
     const prepared = await prepareGenerationMemory({
         chatState,
         recentMessages,
         allMessages: allNormalized,
-        settings,
+        settings: effectiveSettings,
     });
     const memoryBlock = prepared.memoryBlock;
 

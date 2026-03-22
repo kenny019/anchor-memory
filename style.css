@@ -57,3 +57,24 @@
 .am-card button.menu_button {
   margin-top: 8px;
 }
+
+.am-advanced {
+  margin-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 8px;
+}
+
+.am-advanced summary {
+  cursor: pointer;
+  font-size: 13px;
+  opacity: 0.7;
+  user-select: none;
+}
+
+.am-advanced summary:hover {
+  opacity: 1;
+}
+
+.am-advanced[open] summary {
+  margin-bottom: 8px;
+}

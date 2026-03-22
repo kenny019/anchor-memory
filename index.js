@@ -66,6 +66,7 @@ function bindUi() {
     $('#am_scene_threshold').val(settings.sceneMessageThreshold);
     $('#am_prompt_position').val(settings.promptPosition);
     $('#am_prompt_depth').val(settings.promptDepth);
+    $('#am_memory_format').val(settings.memoryFormat);
 
     $('#am_enabled').off('change').on('change', function () {
         updateSettings({ enabled: $(this).prop('checked') });
@@ -93,6 +94,9 @@ function bindUi() {
 
     $('#am_prompt_depth').off('input').on('input', function () {
         updateSettings({ promptDepth: toPositiveInt($(this).val(), 1) });
+    });
+    $('#am_memory_format').off('change').on('change', function () {
+        updateSettings({ memoryFormat: String($(this).val() || 'text') });
     });
 
     // Windowed extraction

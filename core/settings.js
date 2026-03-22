@@ -41,6 +41,9 @@ const DEFAULT_SETTINGS = {
     llmRetrieval: false,
     retrievalChunkSize: 10,
 
+    // Memory format
+    memoryFormat: 'text',
+
     // Queryable memory tool
     memoryToolEnabled: false,
 };

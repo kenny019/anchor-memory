@@ -233,6 +233,24 @@ assert('e2e', 'Memory block contains current location',
     memoryBlock.toLowerCase().includes('forest') || memoryBlock.toLowerCase().includes('citadel'),
     `block does not reference current scene`);
 
+// --- Test 6: XML format ---
+
+console.log('\n=== Test 6: XML Format ===');
+
+const xmlBlock = formatMemoryBlock({ sceneCard: selected.sceneCard, episodes: selected.episodes, maxChars: 4000, format: 'xml' });
+assert('xml', 'XML block is non-empty', xmlBlock.length > 0);
+assert('xml', 'XML block starts with <anchor_memory>', xmlBlock.startsWith('<anchor_memory>'));
+assert('xml', 'XML block ends with </anchor_memory>', xmlBlock.trimEnd().endsWith('</anchor_memory>'));
+assert('xml', 'XML block contains <scene>', xmlBlock.includes('<scene>'));
+assert('xml', 'XML block under 4000 chars', xmlBlock.length <= 4000, `got ${xmlBlock.length} chars`);
+assert('xml', 'XML block contains location', xmlBlock.toLowerCase().includes('forest') || xmlBlock.toLowerCase().includes('citadel'));
+
+// Empty input returns empty for both formats
+const emptyText = formatMemoryBlock({ sceneCard: null, episodes: [], format: 'text' });
+const emptyXml = formatMemoryBlock({ sceneCard: null, episodes: [], format: 'xml' });
+assert('xml', 'Empty text returns empty string', emptyText === '');
+assert('xml', 'Empty xml returns empty string', emptyXml === '');
+
 // --- Results ---
 
 console.log('\n' + '='.repeat(50));
