@@ -32,6 +32,19 @@ function isAbstractPhrase(text) {
     return words.every(w => ABSTRACT_WORDS.has(w));
 }
 
+function trimLocationCandidate(text) {
+    if (!text) return '';
+    // Reject pronoun-starting phrases ("his eye sockets", "her words")
+    if (/^(?:his|her|my|your|their|its|our|he|she|it|they|we|i)\b/i.test(text)) return '';
+    // Truncate at auxiliary/clause-boundary verbs
+    let trimmed = text
+        .replace(/\s+(?:does|did|do|is|are|was|were|has|have|had|will|shall|can|could|would|should|might|must|may|that|which|who|where|when|while|but|yet|so|then|just|simply|suddenly)\b.*/i, '')
+        .replace(/\s+\w+n['\u2019]t\b.*/i, '');
+    // Cap at 8 words
+    const words = trimmed.trim().split(/\s+/);
+    return words.length > 8 ? words.slice(0, 8).join(' ') : trimmed.trim();
+}
+
 export function extractStateUpdates({
     chatState,
     recentMessages = [],
@@ -69,13 +82,14 @@ function findLatestValue(texts, extractor) {
 
 function extractLocationCandidate(text) {
     const patterns = [
-        /\b(?:back at|back in|inside|in|at|near|outside(?: of)?)\s+([A-Z][^,.!?;\n]{2,48}|the [^,.!?;\n]{2,48})/i,
+        /\b(?:back at|back in|inside|in|at|near|outside(?: of)?)\s+([A-Z][^,.!?;\n\u2014\u2013""\u201C\u201D()*]{2,48}|the [^,.!?;\n\u2014\u2013""\u201C\u201D()*]{2,48})/i,
     ];
 
     for (const pattern of patterns) {
         const match = text.match(pattern);
         if (!match) continue;
-        const candidate = cleanLocationPhrase(match[1]);
+        let candidate = cleanLocationPhrase(match[1]);
+        candidate = trimLocationCandidate(candidate);
         if (!candidate || isAbstractPhrase(candidate)) continue;
         return candidate;
     }
@@ -123,19 +137,32 @@ function extractConflictCandidate(text) {
 }
 
 function extractOpenThreadCandidates(text) {
-    const results = [];
-    const questionClauses = text.split(/[!?]/).map(cleanPhrase).filter(Boolean);
+    // Strip RP formatting and quotation marks for cleaner extraction
+    const stripped = text
+        .replace(/\*[^*]+\*/g, ' ')
+        .replace(/[""\u201C\u201D]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
 
-    for (const clause of questionClauses) {
-        if (/\b(?:who|why|how|what happened|where)\b/i.test(clause)) {
-            results.push(capTail(clause, 150));
+    const results = [];
+    // Split on sentence boundaries (not just ?!) for tighter clauses
+    const sentences = stripped.split(/[.!?]+/).map(cleanPhrase).filter(Boolean);
+
+    // Take at most one wh-thread per text block (shortest = most specific)
+    let best = '';
+    for (const sentence of sentences) {
+        if (sentence.length < 15) continue;
+        if (/\b(?:I spoke|I said|he said|she said|he asked|she asked|they said|I asked)\b/i.test(sentence)) continue;
+        if (/\b(?:who|why|how|what happened|where)\b/i.test(sentence)) {
+            if (!best || sentence.length < best.length) best = sentence;
         }
     }
+    if (best) results.push(capTail(best, 100));
 
     const patternMatches = [
-        text.match(/\bneed to find\s+([^.!?\n]{2,80})/i),
-        text.match(/\bstill don't know\s+([^.!?\n]{2,80})/i),
-        text.match(/\btrying to figure out\s+([^.!?\n]{2,80})/i),
+        stripped.match(/\bneed to find\s+([^.!?\n]{2,80})/i),
+        stripped.match(/\bstill don't know\s+([^.!?\n]{2,80})/i),
+        stripped.match(/\btrying to figure out\s+([^.!?\n]{2,80})/i),
     ].filter(Boolean);
 
     for (const match of patternMatches) {

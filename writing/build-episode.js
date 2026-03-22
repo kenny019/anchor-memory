@@ -83,7 +83,7 @@ function deriveSignificance(messages) {
 }
 
 function extractLocationCandidate(text) {
-    const match = String(text || '').match(/\b(?:back at|back in|inside|in|at|near|outside(?: of)?)\s+([A-Z][^,.!?;\n]{2,48}|the [^,.!?;\n]{2,48})/i);
+    const match = String(text || '').match(/\b(?:back at|back in|inside|in|at|near|outside(?: of)?)\s+([A-Z][^,.!?;\n\u2014\u2013""\u201C\u201D()*]{2,48}|the [^,.!?;\n\u2014\u2013""\u201C\u201D()*]{2,48})/i);
     return match ? cleanLocationPhrase(match[1]) : '';
 }
 
