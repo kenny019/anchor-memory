@@ -1,3 +1,37 @@
+// Shared word sets for filtering false positives across extractors.
+// Intentionally extensible — add new entries when dogfooding reveals false positives.
+const FILLER_WORDS = new Set([
+    'the', 'a', 'an', 'of', 'and', 'or', 'his', 'her', 'its', 'their', 'my', 'our', 'your',
+]);
+
+const ABSTRACT_WORDS = new Set([
+    // emotions / mental states
+    'intensity', 'silence', 'darkness', 'light', 'shadow', 'shadows',
+    'fear', 'anger', 'joy', 'confusion', 'disbelief', 'awe', 'surprise',
+    'horror', 'pain', 'agony', 'despair', 'sorrow', 'grief', 'rage',
+    'panic', 'shock', 'wonder', 'disgust', 'contempt', 'doubt',
+    'anticipation', 'dread', 'terror', 'fury', 'ecstasy', 'bliss',
+    'tears', 'urge', 'impulse', 'desire', 'temptation', 'sleep',
+    // sensory / abstract concepts
+    'ambient', 'distance', 'moment', 'clarity', 'general', 'particular',
+    'response', 'addition', 'return', 'contrast', 'comparison', 'truth',
+    'reality', 'earnest', 'haste', 'vain', 'secret', 'private',
+    'fact', 'theory', 'mind', 'spirit', 'essence', 'detail', 'brief',
+    'short', 'time', 'kind', 'sort', 'way', 'turn', 'breath',
+    'unison', 'tandem', 'succession', 'order', 'chaos', 'notice',
+    'view', 'past', 'words', 'thoughts', 'memories', 'dreams',
+]);
+
+function contentWords(text) {
+    return text.toLowerCase().split(/\s+/).filter(w => w.length > 0 && !FILLER_WORDS.has(w));
+}
+
+function isAbstractPhrase(text) {
+    const words = contentWords(text);
+    if (words.length === 0) return true;
+    return words.every(w => ABSTRACT_WORDS.has(w));
+}
+
 export function extractStateUpdates({
     chatState,
     recentMessages = [],
@@ -41,7 +75,9 @@ function extractLocationCandidate(text) {
     for (const pattern of patterns) {
         const match = text.match(pattern);
         if (!match) continue;
-        return cleanLocationPhrase(match[1]);
+        const candidate = cleanLocationPhrase(match[1]);
+        if (!candidate || isAbstractPhrase(candidate)) continue;
+        return candidate;
     }
 
     return '';
@@ -56,6 +92,8 @@ function extractGoalCandidate(text) {
     const match = text.match(/\b(?:need to|needs to|trying to|tries to|must|have to|plan to|plans to|want to|wants to)\s+([^.!?\n]{4,100})/i);
     return match ? cleanPhrase(match[1]) : '';
 }
+
+const TEMPORAL_VAGUE = /\bfor\s+(?:some|a\s+(?:long|short|brief)?\s*(?:time|while|moment|bit))|for\s+quite\b/i;
 
 function extractConflictCandidate(text) {
     const patterns = [
@@ -72,7 +110,13 @@ function extractConflictCandidate(text) {
 
     for (const pattern of patterns) {
         const match = text.match(pattern);
-        if (match) return cleanPhrase(match[1]);
+        if (!match) continue;
+        const candidate = cleanPhrase(match[1]);
+        if (TEMPORAL_VAGUE.test(candidate)) continue;
+        // Extract the object after the verb phrase and reject if all abstract
+        const objectText = candidate.replace(/^\S+\s+(?:with|from|for)?\s*/i, '');
+        if (objectText && isAbstractPhrase(objectText)) continue;
+        return candidate;
     }
 
     return '';
@@ -84,7 +128,7 @@ function extractOpenThreadCandidates(text) {
 
     for (const clause of questionClauses) {
         if (/\b(?:who|why|how|what happened|where)\b/i.test(clause)) {
-            results.push(clause);
+            results.push(capTail(clause, 150));
         }
     }
 
@@ -99,6 +143,13 @@ function extractOpenThreadCandidates(text) {
     }
 
     return results;
+}
+
+function capTail(text, maxLen) {
+    if (text.length <= maxLen) return text;
+    const sliced = text.slice(-maxLen);
+    const trimmed = sliced.replace(/^\S*\s/, '');
+    return trimmed || sliced;
 }
 
 function cleanPhrase(value) {
