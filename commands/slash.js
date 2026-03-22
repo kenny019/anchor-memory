@@ -1,4 +1,4 @@
-import { getContext } from '../../../st-context.js';
+import { getContext } from '../../../../st-context.js';
 import { clearExtensionPrompt, getSettings } from '../core/settings.js';
 import { clearRetrievalSnapshot, getActiveChatId, getChatState, getRetrievalSnapshot, resetChatState, saveChatState } from '../core/storage.js';
 import { prepareGenerationMemory } from '../runtime/generation-hook.js';

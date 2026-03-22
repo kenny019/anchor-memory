@@ -1,5 +1,5 @@
-import { extension_prompt_types, setExtensionPrompt } from '../../../../script.js';
-import { getContext } from '../../../st-context.js';
+import { extension_prompt_types, setExtensionPrompt } from '../../../../../script.js';
+import { getContext } from '../../../../st-context.js';
 import { getSettings, getPromptKey } from '../core/settings.js';
 import { getChatState, getActiveChatId, setRetrievalSnapshot, clearRetrievalSnapshot } from '../core/storage.js';
 import { createPromptPayload } from '../integration/prompt-injection.js';

@@ -1,4 +1,4 @@
-import { getContext } from '../../../st-context.js';
+import { getContext } from '../../../../st-context.js';
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_MAX_TOKENS = 300;

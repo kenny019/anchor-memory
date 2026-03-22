@@ -7,6 +7,6 @@
   "js": "index.js",
   "css": "style.css",
   "author": "kenny019",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Practical RP memory scaffold for SillyTavern with state cards, episode memory, and deterministic retrieval."
 }

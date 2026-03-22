@@ -1,4 +1,4 @@
-import { event_types } from '../../../../script.js';
+import { event_types } from '../../../../../script.js';
 
 const registeredHooks = [];
 

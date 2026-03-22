@@ -1,5 +1,5 @@
-import { getContext } from '../../../st-context.js';
-import { saveMetadataDebounced } from '../../../extensions.js';
+import { getContext } from '../../../../st-context.js';
+import { saveMetadataDebounced } from '../../../../extensions.js';
 import { normalizeEpisode } from '../models/episodes.js';
 import { createSceneCard, normalizeSceneCard } from '../models/state-cards.js';
 

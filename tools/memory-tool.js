@@ -1,4 +1,4 @@
-import { getContext } from '../../../st-context.js';
+import { getContext } from '../../../../st-context.js';
 import { getSettings } from '../core/settings.js';
 import { getChatState, getActiveChatId } from '../core/storage.js';
 import { buildQueryContext } from '../retrieval/query-builder.js';

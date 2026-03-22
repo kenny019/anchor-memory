@@ -1,4 +1,4 @@
-import { getContext } from '../../../st-context.js';
+import { getContext } from '../../../../st-context.js';
 import { getSettings } from '../core/settings.js';
 import { getActiveChatId, getChatState, saveChatState } from '../core/storage.js';
 import { hasEpisodeSpan, EPISODE_TYPE } from '../models/episodes.js';

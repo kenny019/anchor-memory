@@ -1,5 +1,5 @@
-import { extension_prompt_types, setExtensionPrompt } from '../../../../script.js';
-import { extension_settings } from '../../../extensions.js';
+import { extension_prompt_types, setExtensionPrompt } from '../../../../../script.js';
+import { extension_settings } from '../../../../extensions.js';
 
 const EXTENSION_NAME = 'anchor-memory';
 const PROMPT_KEY = 'anchor_memory_prompt';
