@@ -5,6 +5,12 @@
   "description": "Practical RP memory extension scaffold for SillyTavern.",
   "type": "module",
   "scripts": {
-    "check": "find . -name '*.js' -print0 | xargs -0 -n1 node --check"
+    "check": "find . -name '*.js' -print0 | xargs -0 -n1 node --check",
+    "eval": "node eval/run.js",
+    "eval:llm": "node eval/run-llm.js",
+    "eval:rlm": "node eval/run-rlm.js",
+    "eval:rp:gen": "node eval/generate-rp-fixture.js",
+    "eval:rp": "node eval/run-rp-eval.js",
+    "setup": "cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit"
   }
 }

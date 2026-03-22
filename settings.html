@@ -82,7 +82,19 @@
     </label>
     <button id="am_consolidate_now" class="menu_button">Consolidate Now</button>
 
-    <h5>Re-ranking</h5>
+    <h5>RLM Retrieval</h5>
+    <p class="am-hint">Replaces keyword scoring with LLM-powered retrieval. Finds narratively relevant memories, not just keyword matches.</p>
+    <label>
+      <input id="am_llm_retrieval" type="checkbox" />
+      Enable RLM retrieval (recommended)
+    </label>
+    <label class="am-field">
+      <span>Chunk size</span>
+      <input id="am_retrieval_chunk_size" type="number" min="3" max="20" step="1" />
+    </label>
+
+    <h5>Re-ranking (legacy)</h5>
+    <p class="am-hint">Only used when RLM retrieval is off. Re-ranks keyword-scored results.</p>
     <label>
       <input id="am_llm_reranking" type="checkbox" />
       Enable LLM re-ranking

@@ -135,6 +135,17 @@ function bindUi() {
     $('#am_consolidation_threshold').off('input').on('input', function () {
         updateSettings({ consolidationThreshold: toPositiveInt($(this).val(), 60) });
     });
+    // RLM retrieval
+    $('#am_llm_retrieval').prop('checked', settings.llmRetrieval);
+    $('#am_retrieval_chunk_size').val(settings.retrievalChunkSize);
+
+    $('#am_llm_retrieval').off('change').on('change', function () {
+        updateSettings({ llmRetrieval: $(this).prop('checked') });
+    });
+    $('#am_retrieval_chunk_size').off('input').on('input', function () {
+        updateSettings({ retrievalChunkSize: toPositiveInt($(this).val(), 10) });
+    });
+
     $('#am_llm_reranking').off('change').on('change', function () {
         updateSettings({ llmReranking: $(this).prop('checked') });
     });

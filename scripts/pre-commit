@@ -1,0 +1,27 @@
+#!/bin/sh
+# Pre-commit hook: block commits containing API key patterns.
+# Install: npm run setup
+
+STAGED=$(git diff --cached --diff-filter=d -- . ':!.env.example')
+
+if [ -z "$STAGED" ]; then
+    exit 0
+fi
+
+# Check for API key prefixes followed by 20+ alphanumeric chars
+for PATTERN in 'sk-or-[A-Za-z0-9]{20,}' 'sk-ant-[A-Za-z0-9]{20,}' 'sk-proj-[A-Za-z0-9]{20,}'; do
+    MATCH=$(echo "$STAGED" | grep -E "$PATTERN" || true)
+    if [ -n "$MATCH" ]; then
+        echo ""
+        echo "ERROR: Possible API key detected in staged changes!"
+        echo ""
+        echo "Pattern: $PATTERN"
+        echo "Match:   $(echo "$MATCH" | head -3)"
+        echo ""
+        echo "If this is a false positive, use: git commit --no-verify"
+        echo ""
+        exit 1
+    fi
+done
+
+exit 0

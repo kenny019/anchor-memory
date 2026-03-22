@@ -106,5 +106,4 @@ anchor-memory/
 
 ## Design Notes
 
-- [Supermemory V2 Integration](./docs/SUPERMEMORY_V2.md)
 - [v1.1 Automatic By Default](./docs/V1_1_AUTOMATIC_BY_DEFAULT.md)

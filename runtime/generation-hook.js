@@ -9,6 +9,7 @@ import { scoreEpisodes } from '../retrieval/score-episodes.js';
 import { selectMemoryItems } from '../retrieval/selector.js';
 import { formatMemoryBlock } from '../retrieval/formatter.js';
 import { rerankEpisodes } from '../retrieval/reranker.js';
+import { rlmRetrieve } from '../retrieval/rlm-retriever.js';
 import { createLLMCaller } from '../llm/api.js';
 
 export async function prepareGenerationMemory({
@@ -22,14 +23,26 @@ export async function prepareGenerationMemory({
     });
 
     const scoredSceneCard = scoreSceneCard(chatState?.sceneCard || null, queryContext);
-    let scoredEpisodes = scoreEpisodes(chatState?.episodes || [], queryContext);
+    let scoredEpisodes;
 
-    if (settings.llmReranking && scoredEpisodes.length > 1) {
-        const candidateCount = Number(settings.rerankCandidateCount) || 8;
-        const topCandidates = scoredEpisodes.slice(0, candidateCount);
-        const timeoutMs = Number(settings.rerankTimeoutMs) || 5000;
-        const reranked = await rerankEpisodes({ candidates: topCandidates, queryContext, llmCallFn: createLLMCaller(settings, { timeoutMs }), timeoutMs });
-        scoredEpisodes = [...reranked, ...scoredEpisodes.slice(candidateCount)];
+    if (settings.llmRetrieval) {
+        scoredEpisodes = await rlmRetrieve({
+            episodes: chatState?.episodes || [],
+            queryContext,
+            llmCallFn: createLLMCaller(settings),
+            chunkSize: Number(settings.retrievalChunkSize) || 10,
+            maxResults: Number(settings.maxEpisodesInjected) || 3,
+            keywordFallbackFn: () => scoreEpisodes(chatState?.episodes || [], queryContext),
+        });
+    } else {
+        scoredEpisodes = scoreEpisodes(chatState?.episodes || [], queryContext);
+        if (settings.llmReranking && scoredEpisodes.length > 1) {
+            const candidateCount = Number(settings.rerankCandidateCount) || 8;
+            const topCandidates = scoredEpisodes.slice(0, candidateCount);
+            const timeoutMs = Number(settings.rerankTimeoutMs) || 5000;
+            const reranked = await rerankEpisodes({ candidates: topCandidates, queryContext, llmCallFn: createLLMCaller(settings, { timeoutMs }), timeoutMs });
+            scoredEpisodes = [...reranked, ...scoredEpisodes.slice(candidateCount)];
+        }
     }
 
     const selected = selectMemoryItems({

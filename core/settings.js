@@ -34,6 +34,10 @@ const DEFAULT_SETTINGS = {
     rerankCandidateCount: 8,
     rerankTimeoutMs: 5000,
 
+    // RLM retrieval
+    llmRetrieval: false,
+    retrievalChunkSize: 10,
+
     // Queryable memory tool
     memoryToolEnabled: false,
 };
