@@ -1,11 +1,13 @@
 import { createEpisode } from '../models/episodes.js';
+import { buildLLMSummary, buildHeuristicSummary } from './llm-summarizer.js';
 
-export function buildEpisodeCandidate({
+export async function buildEpisodeCandidate({
     chatState,
     recentMessages = [],
     settings = {},
     titleOverride = '',
     force = false,
+    llmCallFn = null,
 } = {}) {
     if (!Array.isArray(recentMessages) || recentMessages.length === 0) {
         return null;
@@ -24,7 +26,9 @@ export function buildEpisodeCandidate({
     const participants = uniqueStrings(candidates.map(message => message.name || (message.isUser ? 'User' : 'Character')), 6);
     const locations = uniqueStrings(candidates.map(message => extractLocationCandidate(message.text)).filter(Boolean), 3);
     const title = titleOverride || buildEpisodeTitle(chatState?.sceneCard, locations, chatState?.episodes?.length || 0);
-    const summary = buildSummary(candidates, locations);
+    const summary = llmCallFn && settings.llmSummarization
+        ? await buildLLMSummary(candidates, locations, llmCallFn)
+        : buildHeuristicSummary(candidates, locations);
     const tags = buildTags(candidates, locations);
     const significance = deriveSignificance(candidates);
 

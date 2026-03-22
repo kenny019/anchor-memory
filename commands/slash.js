@@ -112,7 +112,7 @@ async function previewRetrieval() {
     ].join('\n');
 }
 
-function forceSceneBoundary(titleOverride = '') {
+async function forceSceneBoundary(titleOverride = '') {
     const chatId = getActiveChatId();
     const chatState = getChatState(chatId);
     const context = getContext();
@@ -125,7 +125,7 @@ function forceSceneBoundary(titleOverride = '') {
             text: String(message.mes || ''),
         }));
 
-    const candidate = buildEpisodeCandidate({
+    const candidate = await buildEpisodeCandidate({
         chatState,
         recentMessages,
         settings: {

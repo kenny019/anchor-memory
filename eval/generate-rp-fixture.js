@@ -229,8 +229,11 @@ Format: "User: ..." or "${characterName}: ..." on separate lines.`;
 async function generateProbes(messages, characterName) {
     const probes = [];
     const positions = [0.1, 0.3, 0.5, 0.7, 0.9];
+    const probeTypes = ['detail', 'narrative', 'detail', 'narrative', 'detail'];
 
-    for (const pos of positions) {
+    for (let i = 0; i < positions.length; i++) {
+        const pos = positions[i];
+        const type = probeTypes[i];
         const center = Math.floor(messages.length * pos);
         const start = Math.max(0, center - 5);
         const end = Math.min(messages.length - 1, center + 4);
@@ -241,8 +244,17 @@ async function generateProbes(messages, characterName) {
 
         const excerpt = window.map(m => `${m.name}: ${m.text.slice(0, 300)}`).join('\n');
 
-        const result = await llmCall({
-            prompt: `Given this roleplay excerpt (messages ${start}-${end}), create one specific memory probe question.
+        const prompt = type === 'narrative'
+            ? `Given this roleplay excerpt (messages ${start}-${end}), create one narrative reasoning question.
+The question should test understanding of character motivations, relationship dynamics, cause-and-effect, or story progression — NOT specific objects or details.
+Examples: "How did X's attitude toward Y change?", "What caused the conflict at Z?", "Why did X decide to do that?"
+
+Return JSON: {"question": "...", "answer": "...", "category": "narrative|causal"}
+Return ONLY the JSON.
+
+Excerpt:
+${excerpt}`
+            : `Given this roleplay excerpt (messages ${start}-${end}), create one specific memory probe question.
 The question should test recall of a concrete detail, event, or character action from THIS excerpt.
 Make it specific: names, objects, locations, or actions that only someone who read this section would know.
 
@@ -250,7 +262,10 @@ Return JSON: {"question": "...", "answer": "...", "category": "detail|event|char
 Return ONLY the JSON.
 
 Excerpt:
-${excerpt}`,
+${excerpt}`;
+
+        const result = await llmCall({
+            prompt,
             systemPrompt: 'Create precise memory test questions. Return only JSON.',
             maxTokens: 200,
         });
@@ -265,7 +280,7 @@ ${excerpt}`,
                 probes.push({
                     question: parsed.question,
                     answer: parsed.answer,
-                    category: parsed.category || 'detail',
+                    category: parsed.category || type,
                     sourceRange: [start, end],
                 });
             }

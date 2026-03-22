@@ -34,6 +34,9 @@ const DEFAULT_SETTINGS = {
     rerankCandidateCount: 8,
     rerankTimeoutMs: 5000,
 
+    // LLM episode summarization
+    llmSummarization: false,
+
     // RLM retrieval
     llmRetrieval: false,
     retrievalChunkSize: 10,

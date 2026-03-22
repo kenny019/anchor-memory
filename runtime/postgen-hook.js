@@ -75,13 +75,14 @@ export async function processCompletedTurn({
     );
 
     const episodeCandidate = resolvedSettings.autoCreateEpisodes && type === 'normal'
-        ? buildEpisodeCandidate({
+        ? await buildEpisodeCandidate({
             chatState: {
                 ...resolvedChatState,
                 sceneCard: nextSceneCard,
             },
             recentMessages: normalizedMessages,
             settings: resolvedSettings,
+            llmCallFn: resolvedSettings.llmSummarization ? createLLMCaller(resolvedSettings) : null,
         })
         : null;
 

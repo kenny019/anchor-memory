@@ -10,11 +10,14 @@ import { selectMemoryItems } from '../retrieval/selector.js';
 import { formatMemoryBlock } from '../retrieval/formatter.js';
 import { rerankEpisodes } from '../retrieval/reranker.js';
 import { rlmRetrieve } from '../retrieval/rlm-retriever.js';
+import { deepRetrieve } from '../retrieval/deep-retriever.js';
+import { refineQuery } from '../retrieval/query-refiner.js';
 import { createLLMCaller } from '../llm/api.js';
 
 export async function prepareGenerationMemory({
     chatState,
     recentMessages = [],
+    allMessages = [],
     settings = {},
 } = {}) {
     const queryContext = buildQueryContext({
@@ -26,14 +29,42 @@ export async function prepareGenerationMemory({
     let scoredEpisodes;
 
     if (settings.llmRetrieval) {
+        const llmCallFn = createLLMCaller(settings);
+        let queryCtx = queryContext;
+
         scoredEpisodes = await rlmRetrieve({
             episodes: chatState?.episodes || [],
-            queryContext,
-            llmCallFn: createLLMCaller(settings),
+            queryContext: queryCtx,
+            llmCallFn,
             chunkSize: Number(settings.retrievalChunkSize) || 10,
-            maxResults: Number(settings.maxEpisodesInjected) || 3,
-            keywordFallbackFn: () => scoreEpisodes(chatState?.episodes || [], queryContext),
+            maxResults: 8,
+            keywordFallbackFn: () => scoreEpisodes(chatState?.episodes || [], queryCtx),
         });
+
+        // Phase 3: adaptive refinement if all scores low
+        const maxScore = scoredEpisodes.reduce((max, s) => Math.max(max, s.score), 0);
+        if (maxScore <= 3 && scoredEpisodes.length > 0) {
+            queryCtx = await refineQuery({ queryContext: queryCtx, llmCallFn });
+            scoredEpisodes = await rlmRetrieve({
+                episodes: chatState?.episodes || [],
+                queryContext: queryCtx,
+                llmCallFn,
+                chunkSize: Number(settings.retrievalChunkSize) || 10,
+                maxResults: 8,
+                keywordFallbackFn: () => scoreEpisodes(chatState?.episodes || [], queryCtx),
+            });
+        }
+
+        // Phase 2: deep retrieval on top candidates
+        if (allMessages.length > 0 && scoredEpisodes.length > 0) {
+            scoredEpisodes = await deepRetrieve({
+                candidates: scoredEpisodes.slice(0, 8),
+                queryContext: queryCtx,
+                allMessages,
+                llmCallFn,
+                maxResults: Number(settings.maxEpisodesInjected) || 3,
+            });
+        }
     } else {
         scoredEpisodes = scoreEpisodes(chatState?.episodes || [], queryContext);
         if (settings.llmReranking && scoredEpisodes.length > 1) {
@@ -84,10 +115,12 @@ export async function runGenerationInterceptor(chat = [], _contextSize, _abort, 
     const chatId = getActiveChatId();
     const chatState = getChatState(chatId);
     const preserveRecent = Number(settings.preserveRecentMessages) || 12;
-    const recentMessages = normalizeRecentMessages(chat).slice(-preserveRecent);
+    const allNormalized = normalizeRecentMessages(chat);
+    const recentMessages = allNormalized.slice(-preserveRecent);
     const prepared = await prepareGenerationMemory({
         chatState,
         recentMessages,
+        allMessages: allNormalized,
         settings,
     });
     const memoryBlock = prepared.memoryBlock;

@@ -134,7 +134,7 @@ for (const ep of EPISODE_EXPECTATIONS) {
         episodes: [],
         lastEpisodeBoundaryMessageId: -1,
     };
-    const candidate = buildEpisodeCandidate({
+    const candidate = await buildEpisodeCandidate({
         chatState,
         recentMessages: messages,
         settings: { sceneMessageThreshold: ep.threshold },
@@ -204,7 +204,7 @@ for (let i = 0; i < CHAT_MESSAGES.length; i += 10) {
     const stateUpdate = extractStateUpdates({ recentMessages: batch });
     sceneCard = mergeSceneCard(sceneCard, stateUpdate, { updatedAtMessageId: i + 9, updatedAtTs: Date.now() });
 
-    const candidate = buildEpisodeCandidate({
+    const candidate = await buildEpisodeCandidate({
         chatState: { sceneCard, episodes, lastEpisodeBoundaryMessageId: lastBoundary },
         recentMessages: batch,
         settings: { sceneMessageThreshold: 10 },

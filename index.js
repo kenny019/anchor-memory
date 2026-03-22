@@ -126,6 +126,12 @@ function bindUi() {
     $('#am_memory_model').off('input').on('input', function () {
         updateSettings({ memoryModel: String($(this).val() || '') });
     });
+    // LLM summarization
+    $('#am_llm_summarization').prop('checked', settings.llmSummarization);
+    $('#am_llm_summarization').off('change').on('change', function () {
+        updateSettings({ llmSummarization: $(this).prop('checked') });
+    });
+
     $('#am_llm_consolidation').off('change').on('change', function () {
         updateSettings({ llmConsolidation: $(this).prop('checked') });
     });

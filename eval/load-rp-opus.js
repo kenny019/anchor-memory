@@ -44,7 +44,7 @@ export async function loadRpOpusData({ maxProbes = 5, llmCallFn = null } = {}) {
 
     // Build episodes for each conversation
     for (const conv of conversations) {
-        conv.episodes = buildEpisodesFromMessages(conv.messages);
+        conv.episodes = await buildEpisodesFromMessages(conv.messages);
         console.log(`  ${conv.characterName}: ${conv.messages.length} msgs → ${conv.episodes.length} episodes`);
     }
 
@@ -141,7 +141,7 @@ function convertConversation(candidate) {
     };
 }
 
-function buildEpisodesFromMessages(messages) {
+async function buildEpisodesFromMessages(messages) {
     const episodes = [];
     let sceneCard = createSceneCard();
     let lastBoundary = -1;
@@ -155,7 +155,7 @@ function buildEpisodesFromMessages(messages) {
             updatedAtTs: Date.now(),
         });
 
-        const candidate = buildEpisodeCandidate({
+        const candidate = await buildEpisodeCandidate({
             chatState: { sceneCard, episodes, lastEpisodeBoundaryMessageId: lastBoundary },
             recentMessages: batch,
             settings: { sceneMessageThreshold: threshold },

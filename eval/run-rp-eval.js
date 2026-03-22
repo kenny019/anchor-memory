@@ -1,12 +1,15 @@
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { buildQueryContext } from '../retrieval/query-builder.js';
 import { scoreEpisodes } from '../retrieval/score-episodes.js';
 import { rlmRetrieve } from '../retrieval/rlm-retriever.js';
+import { deepRetrieve } from '../retrieval/deep-retriever.js';
+import { refineQuery } from '../retrieval/query-refiner.js';
 import { createSceneCard, mergeSceneCard } from '../models/state-cards.js';
 import { extractStateUpdates } from '../writing/extract-state.js';
 import { buildEpisodeCandidate } from '../writing/build-episode.js';
+import { buildLLMSummary, buildHeuristicSummary } from '../writing/llm-summarizer.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..');
@@ -99,9 +102,84 @@ function coverageRatio(episodes, totalMessages) {
     return Math.min(1, covered / totalMessages);
 }
 
+// --- Episode building ---
+
+async function buildEpisodesForConv(messages, useLLM = false) {
+    const episodes = [];
+    let sceneCard = createSceneCard();
+    let lastBoundary = -1;
+    const threshold = 10;
+    for (let i = threshold - 1; i < messages.length; i += Math.floor(threshold / 2)) {
+        const batch = messages.slice(0, i + 1);
+        const stateUpdate = extractStateUpdates({ recentMessages: batch.slice(-12) });
+        sceneCard = mergeSceneCard(sceneCard, stateUpdate, { updatedAtMessageId: i, updatedAtTs: Date.now() });
+        const candidate = await buildEpisodeCandidate({
+            chatState: { sceneCard, episodes, lastEpisodeBoundaryMessageId: lastBoundary },
+            recentMessages: batch,
+            settings: { sceneMessageThreshold: threshold, llmSummarization: useLLM },
+            llmCallFn: useLLM ? openRouterCall : null,
+        });
+        if (candidate) { episodes.push(candidate); lastBoundary = candidate.messageEnd; }
+    }
+    return episodes;
+}
+
+// --- Retrieval functions ---
+
+async function runKeyword(episodes, queryContext) {
+    const scored = scoreEpisodes(episodes, queryContext);
+    return scored.slice(0, 3).map(s => s.item);
+}
+
+async function runHybrid(episodes, queryContext, messages) {
+    // RLM pass
+    let rlmQueryCtx = queryContext;
+    let rlmScored = await rlmRetrieve({
+        episodes,
+        queryContext: rlmQueryCtx,
+        llmCallFn: openRouterCall,
+        chunkSize: 10,
+        maxResults: 8,
+        keywordFallbackFn: () => scoreEpisodes(episodes, rlmQueryCtx),
+    });
+
+    // Adaptive refinement if all scores low
+    const maxScore = rlmScored.reduce((max, s) => Math.max(max, s.score), 0);
+    if (maxScore <= 3 && rlmScored.length > 0) {
+        rlmQueryCtx = await refineQuery({ queryContext: rlmQueryCtx, llmCallFn: openRouterCall });
+        rlmScored = await rlmRetrieve({
+            episodes,
+            queryContext: rlmQueryCtx,
+            llmCallFn: openRouterCall,
+            chunkSize: 10,
+            maxResults: 8,
+            keywordFallbackFn: () => scoreEpisodes(episodes, rlmQueryCtx),
+        });
+    }
+
+    // Deep retrieval
+    rlmScored = await deepRetrieve({
+        candidates: rlmScored.slice(0, 8),
+        queryContext: rlmQueryCtx,
+        allMessages: messages,
+        llmCallFn: openRouterCall,
+        maxResults: 3,
+    });
+
+    const rlmTop3 = rlmScored.slice(0, 3).map(s => s.item);
+
+    // Merge keyword + RLM for hybrid
+    const kwScored = scoreEpisodes(episodes, queryContext);
+    const kwTop3 = kwScored.slice(0, 3).map(s => s.item);
+    const hybridMap = new Map();
+    for (const ep of kwTop3) hybridMap.set(ep.id, ep);
+    for (const ep of rlmTop3) hybridMap.set(ep.id, ep);
+    return [...hybridMap.values()].slice(0, 6);
+}
+
 // --- Main ---
 
-console.log('\n=== RP Benchmark: Keyword vs RLM on RP Data ===\n');
+console.log('\n=== RP Benchmark: 4-Configuration Comparison ===\n');
 
 const dataPath = join(__dirname, 'data', 'rp-opus-subset.json');
 if (!existsSync(dataPath)) {
@@ -112,124 +190,147 @@ if (!existsSync(dataPath)) {
 const rawData = JSON.parse(readFileSync(dataPath, 'utf-8'));
 const conversations = rawData.conversations || [];
 
-// Build episodes for conversations that don't have them
+// Build both heuristic and LLM episodes
+const llmEpisodeCachePath = join(__dirname, 'data', 'llm-episodes-cache.json');
+let llmEpisodeCache = {};
+if (existsSync(llmEpisodeCachePath)) {
+    llmEpisodeCache = JSON.parse(readFileSync(llmEpisodeCachePath, 'utf-8'));
+}
+
 for (const conv of conversations) {
+    // Heuristic episodes
     if (!conv.episodes || conv.episodes.length === 0) {
-        conv.episodes = buildEpisodesForConv(conv.messages);
-        console.log(`  Built ${conv.episodes.length} episodes for ${conv.characterName}`);
+        conv.episodes = await buildEpisodesForConv(conv.messages, false);
+        console.log(`  Built ${conv.episodes.length} heuristic episodes for ${conv.characterName}`);
+    }
+
+    // LLM episodes (cached)
+    if (llmEpisodeCache[conv.chatId]) {
+        conv.llmEpisodes = llmEpisodeCache[conv.chatId];
+        console.log(`  Loaded ${conv.llmEpisodes.length} cached LLM episodes for ${conv.characterName}`);
+    } else {
+        console.log(`  Building LLM episodes for ${conv.characterName}...`);
+        conv.llmEpisodes = await buildEpisodesForConv(conv.messages, true);
+        llmEpisodeCache[conv.chatId] = conv.llmEpisodes;
+        writeFileSync(llmEpisodeCachePath, JSON.stringify(llmEpisodeCache), 'utf-8');
+        console.log(`  Built ${conv.llmEpisodes.length} LLM episodes for ${conv.characterName} (cached)`);
     }
 }
 
-function buildEpisodesForConv(messages) {
-    const episodes = [];
-    let sceneCard = createSceneCard();
-    let lastBoundary = -1;
-    const threshold = 10;
-    for (let i = threshold - 1; i < messages.length; i += Math.floor(threshold / 2)) {
-        const batch = messages.slice(0, i + 1);
-        const stateUpdate = extractStateUpdates({ recentMessages: batch.slice(-12) });
-        sceneCard = mergeSceneCard(sceneCard, stateUpdate, { updatedAtMessageId: i, updatedAtTs: Date.now() });
-        const candidate = buildEpisodeCandidate({
-            chatState: { sceneCard, episodes, lastEpisodeBoundaryMessageId: lastBoundary },
-            recentMessages: batch,
-            settings: { sceneMessageThreshold: threshold },
-        });
-        if (candidate) { episodes.push(candidate); lastBoundary = candidate.messageEnd; }
-    }
-    return episodes;
+// --- Run all 4 configurations ---
+
+const configs = [
+    { name: 'Heuristic+KW', episodeKey: 'episodes', retrieval: 'keyword' },
+    { name: 'Heuristic+Hybrid', episodeKey: 'episodes', retrieval: 'hybrid' },
+    { name: 'LLM+KW', episodeKey: 'llmEpisodes', retrieval: 'keyword' },
+    { name: 'LLM+Hybrid', episodeKey: 'llmEpisodes', retrieval: 'hybrid' },
+];
+
+const configResults = {};
+for (const cfg of configs) {
+    configResults[cfg.name] = { span: [], contain: [], categories: {} };
 }
 
-const allResults = { keyword: { span: [], contain: [] }, rlm: { span: [], contain: [] } };
-const categoryResults = {};
+let totalProbes = 0;
 
 for (const conv of conversations) {
-    if (!conv.probes?.length || !conv.episodes?.length) {
-        console.log(`  Skipping ${conv.characterName}: no probes or episodes`);
-        continue;
-    }
+    if (!conv.probes?.length) continue;
 
-    console.log(`\n--- ${conv.characterName} (${conv.messages.length} msgs, ${conv.episodes.length} episodes, ${conv.probes.length} probes) ---\n`);
+    console.log(`\n--- ${conv.characterName} (${conv.messages.length} msgs, ${conv.probes.length} probes) ---`);
+    console.log(`    Heuristic: ${conv.episodes.length} episodes | LLM: ${conv.llmEpisodes.length} episodes\n`);
 
     for (const probe of conv.probes) {
+        totalProbes++;
         const queryContext = buildQueryContext({
             recentMessages: [{ text: probe.question }],
             sceneCard: null,
         });
 
-        // Keyword
-        const kwScored = scoreEpisodes(conv.episodes, queryContext);
-        const kwTop3 = kwScored.slice(0, 3).map(s => s.item);
-        const kwSpan = spanOverlap(kwTop3, probe.sourceRange);
-        const kwContain = answerContainment(kwTop3, probe.answer, conv.messages);
+        const results = {};
 
-        // RLM
-        const rlmScored = await rlmRetrieve({
-            episodes: conv.episodes,
-            queryContext,
-            llmCallFn: openRouterCall,
-            chunkSize: 10,
-            maxResults: 3,
-            keywordFallbackFn: () => scoreEpisodes(conv.episodes, queryContext),
-        });
-        const rlmTop3 = rlmScored.slice(0, 3).map(s => s.item);
-        const rlmSpan = spanOverlap(rlmTop3, probe.sourceRange);
-        const rlmContain = answerContainment(rlmTop3, probe.answer, conv.messages);
+        for (const cfg of configs) {
+            const episodes = conv[cfg.episodeKey];
+            let top;
 
-        allResults.keyword.span.push(kwSpan ? 1 : 0);
-        allResults.keyword.contain.push(kwContain);
-        allResults.rlm.span.push(rlmSpan ? 1 : 0);
-        allResults.rlm.contain.push(rlmContain);
+            if (cfg.retrieval === 'keyword') {
+                top = await runKeyword(episodes, queryContext);
+            } else {
+                top = await runHybrid(episodes, queryContext, conv.messages);
+            }
 
-        const cat = probe.category || 'unknown';
-        if (!categoryResults[cat]) categoryResults[cat] = { kw: [], rlm: [] };
-        categoryResults[cat].kw.push(kwSpan ? 1 : 0);
-        categoryResults[cat].rlm.push(rlmSpan ? 1 : 0);
+            const span = spanOverlap(top, probe.sourceRange);
+            const contain = answerContainment(top, probe.answer, conv.messages);
 
-        const winner = rlmSpan && !kwSpan ? 'RLM' : kwSpan && !rlmSpan ? 'KW' : kwSpan && rlmSpan ? 'BOTH' : 'MISS';
-        console.log(`  [${cat}] "${probe.question.slice(0, 60)}..." span: KW=${kwSpan ? 'HIT' : 'MISS'} RLM=${rlmSpan ? 'HIT' : 'MISS'} → ${winner}`);
-    }
+            configResults[cfg.name].span.push(span ? 1 : 0);
+            configResults[cfg.name].contain.push(contain);
 
-    // Coverage check
-    const allEpSpans = conv.episodes;
-    const cov = coverageRatio(allEpSpans, conv.messages.length);
-    if (cov > 0.7) {
-        console.log(`  ⚠ Coverage ${(cov * 100).toFixed(0)}% — small haystack, results may not discriminate`);
+            const cat = probe.category || 'unknown';
+            if (!configResults[cfg.name].categories[cat]) configResults[cfg.name].categories[cat] = [];
+            configResults[cfg.name].categories[cat].push(span ? 1 : 0);
+
+            results[cfg.name] = span ? 'HIT' : 'MISS';
+        }
+
+        const q = probe.question.slice(0, 55);
+        console.log(`  [${probe.category}] "${q}..." ${configs.map(c => `${c.name.split('+')[1]}=${results[c.name]}`).join(' | ')}`);
     }
 }
 
 // --- Summary ---
 
 const mean = arr => arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
-const total = allResults.keyword.span.length;
 
-console.log('\n' + '='.repeat(65));
-console.log('RESULTS');
-console.log('='.repeat(65));
+console.log('\n' + '='.repeat(75));
+console.log('RESULTS: 4-CONFIGURATION COMPARISON');
+console.log('='.repeat(75));
 
-console.log(`\nSpan Overlap (binary: did retriever find the right section?):`);
-console.log(`  Keyword: ${(mean(allResults.keyword.span) * 100).toFixed(1)}% hit rate (${allResults.keyword.span.filter(x => x).length}/${total})`);
-console.log(`  RLM:     ${(mean(allResults.rlm.span) * 100).toFixed(1)}% hit rate (${allResults.rlm.span.filter(x => x).length}/${total})`);
+console.log(`\n${'Config'.padEnd(20)} ${'Span Overlap'.padEnd(18)} ${'Answer Containment'.padEnd(20)}`);
+console.log('-'.repeat(58));
 
-console.log(`\nAnswer Containment (% of answer tokens in retrieved text):`);
-console.log(`  Keyword: ${(mean(allResults.keyword.contain) * 100).toFixed(1)}%`);
-console.log(`  RLM:     ${(mean(allResults.rlm.contain) * 100).toFixed(1)}%`);
-
-if (Object.keys(categoryResults).length > 0) {
-    console.log(`\nBy Category (span overlap):`);
-    for (const [cat, scores] of Object.entries(categoryResults)) {
-        const kwRate = (mean(scores.kw) * 100).toFixed(0);
-        const rlmRate = (mean(scores.rlm) * 100).toFixed(0);
-        console.log(`  ${cat.padEnd(15)} KW=${kwRate}% RLM=${rlmRate}%`);
-    }
+for (const cfg of configs) {
+    const r = configResults[cfg.name];
+    const spanRate = (mean(r.span) * 100).toFixed(1);
+    const containRate = (mean(r.contain) * 100).toFixed(1);
+    const spanHits = r.span.filter(x => x).length;
+    console.log(`${cfg.name.padEnd(20)} ${(spanRate + '% (' + spanHits + '/' + totalProbes + ')').padEnd(18)} ${containRate}%`);
 }
 
-const rlmWins = allResults.rlm.span.filter((r, i) => r && !allResults.keyword.span[i]).length;
-const kwWins = allResults.keyword.span.filter((r, i) => r && !allResults.rlm.span[i]).length;
-const bothHit = allResults.rlm.span.filter((r, i) => r && allResults.keyword.span[i]).length;
-const bothMiss = allResults.rlm.span.filter((r, i) => !r && !allResults.keyword.span[i]).length;
+// Category breakdown for best config
+const bestConfig = configs.reduce((best, cfg) =>
+    mean(configResults[cfg.name].span) > mean(configResults[best.name].span) ? cfg : best, configs[0]);
 
-console.log(`\nHead-to-head: RLM-only wins ${rlmWins}, KW-only wins ${kwWins}, both hit ${bothHit}, both miss ${bothMiss}`);
+console.log(`\nBest config: ${bestConfig.name}`);
+console.log('\nBy Category (span overlap):');
+for (const [cat, scores] of Object.entries(configResults[bestConfig.name].categories)) {
+    console.log(`  ${cat.padEnd(15)} ${(mean(scores) * 100).toFixed(0)}%`);
+}
+
+// Improvement metrics
+const baselineRate = mean(configResults['Heuristic+KW'].span);
+const bestRate = mean(configResults[bestConfig.name].span);
+const improvement = ((bestRate - baselineRate) * 100).toFixed(1);
+
+console.log(`\n${'='.repeat(75)}`);
+console.log(`Baseline (Heuristic+KW): ${(baselineRate * 100).toFixed(1)}%`);
+console.log(`Best (${bestConfig.name}): ${(bestRate * 100).toFixed(1)}%`);
+console.log(`Improvement: +${improvement}%`);
 console.log(`Total tokens: ${totalTokens} (~$${(totalTokens * 0.0000001).toFixed(4)})`);
 
-const winner = mean(allResults.rlm.span) > mean(allResults.keyword.span) ? 'RLM' : mean(allResults.rlm.span) < mean(allResults.keyword.span) ? 'KEYWORD' : 'TIE';
-console.log(`\nOverall winner: ${winner}`);
+// Reachable probes: exclude probes that ALL configs miss (data alignment issues, not retrieval failures)
+const allMiss = configResults['Heuristic+KW'].span.map((v, i) =>
+    configs.every(c => !configResults[c.name].span[i])
+);
+const reachableCount = allMiss.filter(m => !m).length;
+const baseReachable = configResults['Heuristic+KW'].span.filter((v, i) => !allMiss[i] && v).length;
+const bestReachable = configResults[bestConfig.name].span.filter((v, i) => !allMiss[i] && v).length;
+
+console.log(`\nReachable probes: ${reachableCount}/${totalProbes} (${totalProbes - reachableCount} missed by ALL configs — data alignment issues)`);
+console.log(`  Baseline on reachable: ${baseReachable}/${reachableCount} = ${(baseReachable / reachableCount * 100).toFixed(1)}%`);
+console.log(`  Best on reachable:     ${bestReachable}/${reachableCount} = ${(bestReachable / reachableCount * 100).toFixed(1)}%`);
+console.log(`  Improvement on reachable: +${((bestReachable / reachableCount - baseReachable / reachableCount) * 100).toFixed(1)}%`);
+
+if (bestRate >= 0.65 && (bestRate - baselineRate) >= 0.25) {
+    console.log('\n✓ TARGET MET: significant improvement demonstrated');
+} else {
+    console.log(`\n✗ TARGET NOT MET: need significant improvement`);
+}

@@ -17,7 +17,7 @@ export async function loadBeamData({ conversationIndex = 0, maxProbes = 20 } = {
 
     const messages = flattenChat(row.chat);
     const probes = parseProbes(row.probing_questions, maxProbes);
-    const episodes = buildEpisodesFromMessages(messages);
+    const episodes = await buildEpisodesFromMessages(messages);
 
     console.log(`  Loaded BEAM conversation: ${messages.length} messages, ${episodes.length} episodes, ${probes.length} probes`);
 
@@ -99,7 +99,7 @@ function parseProbes(probeString, maxProbes) {
     return probes;
 }
 
-function buildEpisodesFromMessages(messages) {
+async function buildEpisodesFromMessages(messages) {
     const episodes = [];
     let sceneCard = createSceneCard();
     let lastBoundary = -1;
@@ -113,7 +113,7 @@ function buildEpisodesFromMessages(messages) {
             updatedAtTs: Date.now(),
         });
 
-        const candidate = buildEpisodeCandidate({
+        const candidate = await buildEpisodeCandidate({
             chatState: { sceneCard, episodes, lastEpisodeBoundaryMessageId: lastBoundary },
             recentMessages: batch,
             settings: { sceneMessageThreshold: threshold },

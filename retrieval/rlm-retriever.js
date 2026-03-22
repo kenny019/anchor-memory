@@ -15,7 +15,20 @@ export async function rlmRetrieve({
         return keywordFallbackFn ? keywordFallbackFn() : [];
     }
 
-    const chunks = partition(active, chunkSize);
+    // Participant boost: put episodes with matching participants first
+    const queryParticipants = (queryContext.sceneParticipants || []).map(p => p.toLowerCase());
+    const queryTerms = (queryContext.terms || []);
+    const allNames = [...queryParticipants, ...queryTerms].filter(Boolean);
+
+    const prioritized = [...active].sort((a, b) => {
+        const aMatch = (a.participants || []).some(p => allNames.some(n => p.toLowerCase().includes(n)));
+        const bMatch = (b.participants || []).some(p => allNames.some(n => p.toLowerCase().includes(n)));
+        if (aMatch && !bMatch) return -1;
+        if (!aMatch && bMatch) return 1;
+        return 0;
+    });
+
+    const chunks = partition(prioritized, chunkSize);
     const prompt = buildSceneContext(queryContext);
     const allHits = [];
     let anySuccess = false;
