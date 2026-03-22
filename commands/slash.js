@@ -1,6 +1,7 @@
 import { getContext } from '../../../../st-context.js';
 import { clearExtensionPrompt, getSettings } from '../core/settings.js';
 import { clearRetrievalSnapshot, getActiveChatId, getChatState, getRetrievalSnapshot, resetChatState, saveChatState } from '../core/storage.js';
+import { hashText } from '../runtime/postgen-hook.js';
 import { prepareGenerationMemory } from '../runtime/generation-hook.js';
 import { hasEpisodeSpan, episodeStats, EPISODE_TYPE } from '../models/episodes.js';
 import { buildEpisodeCandidate } from '../writing/build-episode.js';
@@ -178,7 +179,24 @@ async function runConsolidate() {
 
 function resetMemory() {
     const chatId = getActiveChatId();
+    const context = getContext();
+    const messages = (context.chat || []).filter(m => m && !m.is_system);
+
     resetChatState(chatId);
+
+    // Stamp current turn key + boundary so processCompletedTurn skips old messages
+    if (messages.length > 0) {
+        const chatState = getChatState(chatId);
+        const lastIdx = messages.length - 1;
+        const lastAssistant = [...messages].reverse().find(m => !m.is_user);
+        if (lastAssistant) {
+            const assistantIdx = messages.indexOf(lastAssistant);
+            chatState.lastProcessedTurnKey = `${assistantIdx}:${hashText(String(lastAssistant.mes || ''))}:normal`;
+        }
+        chatState.lastEpisodeBoundaryMessageId = lastIdx;
+        saveChatState(chatId, chatState);
+    }
+
     clearRetrievalSnapshot(chatId);
     clearExtensionPrompt();
     return `Reset Anchor Memory for chat "${chatId}".`;

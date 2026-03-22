@@ -146,7 +146,7 @@ function findLatestAssistantMessage(messages) {
     return null;
 }
 
-function hashText(text) {
+export function hashText(text) {
     let hash = 0;
     const value = String(text || '');
     for (let index = 0; index < value.length; index++) {
