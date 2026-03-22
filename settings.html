@@ -40,6 +40,66 @@
   </div>
 
   <div class="am-card">
+    <h4>Extraction</h4>
+    <label>
+      <input id="am_windowed_extraction" type="checkbox" checked />
+      Windowed extraction (multi-pass, more accurate)
+    </label>
+    <label class="am-field">
+      <span>Window size</span>
+      <input id="am_extraction_window_size" type="number" min="4" max="16" step="1" />
+    </label>
+    <label class="am-field">
+      <span>Window overlap</span>
+      <input id="am_extraction_window_overlap" type="number" min="1" max="6" step="1" />
+    </label>
+  </div>
+
+  <div class="am-card">
+    <h4>LLM Memory</h4>
+    <p class="am-hint">Optional. Uses a separate model for memory operations.</p>
+    <label class="am-field">
+      <span>Model source</span>
+      <input id="am_memory_model_source" type="text" placeholder="e.g. openai, openrouter" />
+    </label>
+    <label class="am-field">
+      <span>Model ID</span>
+      <input id="am_memory_model" type="text" placeholder="e.g. gpt-4o-mini" />
+    </label>
+
+    <h5>Episode Consolidation</h5>
+    <label>
+      <input id="am_llm_consolidation" type="checkbox" />
+      Enable LLM consolidation
+    </label>
+    <label>
+      <input id="am_auto_consolidation" type="checkbox" checked />
+      Auto-consolidate when threshold reached
+    </label>
+    <label class="am-field">
+      <span>Threshold</span>
+      <input id="am_consolidation_threshold" type="number" min="10" step="5" />
+    </label>
+    <button id="am_consolidate_now" class="menu_button">Consolidate Now</button>
+
+    <h5>Re-ranking</h5>
+    <label>
+      <input id="am_llm_reranking" type="checkbox" />
+      Enable LLM re-ranking
+    </label>
+    <label class="am-field">
+      <span>Candidate count</span>
+      <input id="am_rerank_candidate_count" type="number" min="3" max="20" step="1" />
+    </label>
+
+    <h5>Memory Tool</h5>
+    <label>
+      <input id="am_memory_tool_enabled" type="checkbox" />
+      Register recall_memory tool (model calls it on demand)
+    </label>
+  </div>
+
+  <div class="am-card">
     <h4>Current Status</h4>
     <pre id="am_status" class="am-pre">Loading...</pre>
   </div>

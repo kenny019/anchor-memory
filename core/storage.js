@@ -8,12 +8,13 @@ const retrievalSnapshotStore = new Map();
 
 export function createEmptyChatState(chatId = 'default-chat') {
     return {
-        version: 1,
+        version: 2,
         chatId,
         lastProcessedTurnKey: '',
         lastEpisodeBoundaryMessageId: null,
         sceneCard: createSceneCard(),
         episodes: [],
+        pendingConsolidation: false,
     };
 }
 
@@ -36,6 +37,8 @@ export function normalizeChatState(raw, chatId = 'default-chat') {
         ? base.episodes.map(normalizeEpisode).filter(Boolean)
         : [];
     base.lastProcessedTurnKey = String(base.lastProcessedTurnKey || '');
+    base.version = 2;
+    base.pendingConsolidation = Boolean(base.pendingConsolidation);
 
     return base;
 }

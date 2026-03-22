@@ -7,6 +7,9 @@ import { runGenerationInterceptor } from './runtime/generation-hook.js';
 import { processCompletedTurn } from './runtime/postgen-hook.js';
 import { renderPanel } from './ui/panel.js';
 import { registerSlashCommands } from './commands/slash.js';
+import { consolidateEpisodes, applyConsolidation } from './writing/consolidate-episodes.js';
+import { createLLMCaller } from './llm/api.js';
+import { registerMemoryTool, unregisterMemoryTool } from './tools/memory-tool.js';
 
 export const EXTENSION_NAME = 'anchor-memory';
 export const EXTENSION_FOLDER = `third-party/${EXTENSION_NAME}`;
@@ -35,6 +38,10 @@ export async function initAnchorMemory() {
     bindRuntimeEvents();
     registerSlashCommands();
     ensureActiveChatState();
+
+    if (settings.memoryToolEnabled) {
+        registerMemoryTool();
+    }
 
     if (typeof window !== 'undefined') {
         window.AnchorMemory = {
@@ -86,6 +93,86 @@ function bindUi() {
 
     $('#am_prompt_depth').off('input').on('input', function () {
         updateSettings({ promptDepth: toPositiveInt($(this).val(), 1) });
+    });
+
+    // Windowed extraction
+    $('#am_windowed_extraction').prop('checked', settings.windowedExtraction);
+    $('#am_extraction_window_size').val(settings.extractionWindowSize);
+    $('#am_extraction_window_overlap').val(settings.extractionWindowOverlap);
+
+    $('#am_windowed_extraction').off('change').on('change', function () {
+        updateSettings({ windowedExtraction: $(this).prop('checked') });
+    });
+    $('#am_extraction_window_size').off('input').on('input', function () {
+        updateSettings({ extractionWindowSize: toPositiveInt($(this).val(), 8) });
+    });
+    $('#am_extraction_window_overlap').off('input').on('input', function () {
+        updateSettings({ extractionWindowOverlap: toPositiveInt($(this).val(), 3) });
+    });
+
+    // LLM settings
+    $('#am_memory_model_source').val(settings.memoryModelSource);
+    $('#am_memory_model').val(settings.memoryModel);
+    $('#am_llm_consolidation').prop('checked', settings.llmConsolidation);
+    $('#am_auto_consolidation').prop('checked', settings.autoConsolidation);
+    $('#am_consolidation_threshold').val(settings.consolidationThreshold);
+    $('#am_llm_reranking').prop('checked', settings.llmReranking);
+    $('#am_rerank_candidate_count').val(settings.rerankCandidateCount);
+    $('#am_memory_tool_enabled').prop('checked', settings.memoryToolEnabled);
+
+    $('#am_memory_model_source').off('input').on('input', function () {
+        updateSettings({ memoryModelSource: String($(this).val() || '') });
+    });
+    $('#am_memory_model').off('input').on('input', function () {
+        updateSettings({ memoryModel: String($(this).val() || '') });
+    });
+    $('#am_llm_consolidation').off('change').on('change', function () {
+        updateSettings({ llmConsolidation: $(this).prop('checked') });
+    });
+    $('#am_auto_consolidation').off('change').on('change', function () {
+        updateSettings({ autoConsolidation: $(this).prop('checked') });
+    });
+    $('#am_consolidation_threshold').off('input').on('input', function () {
+        updateSettings({ consolidationThreshold: toPositiveInt($(this).val(), 60) });
+    });
+    $('#am_llm_reranking').off('change').on('change', function () {
+        updateSettings({ llmReranking: $(this).prop('checked') });
+    });
+    $('#am_rerank_candidate_count').off('input').on('input', function () {
+        updateSettings({ rerankCandidateCount: toPositiveInt($(this).val(), 8) });
+    });
+    $('#am_memory_tool_enabled').off('change').on('change', function () {
+        const enabled = $(this).prop('checked');
+        updateSettings({ memoryToolEnabled: enabled });
+        if (enabled) {
+            registerMemoryTool();
+        } else {
+            unregisterMemoryTool();
+        }
+    });
+
+    $('#am_consolidate_now').off('click').on('click', async function () {
+        const btn = $(this);
+        btn.prop('disabled', true).text('Consolidating...');
+        try {
+            const settings = getSettings();
+            const chatId = getActiveChatId();
+            const chatState = getChatState(chatId);
+            const llmCallFn = createLLMCaller(settings);
+            const result = await consolidateEpisodes({ chatState, llmCallFn });
+            if (result.archivedIds.length > 0) {
+                const nextState = applyConsolidation(chatState, result);
+                saveChatState(chatId, nextState);
+                btn.text(`Done: ${result.archivedIds.length} → ${result.newEpisodes.length}`);
+            } else {
+                btn.text('No clusters found');
+            }
+        } catch (err) {
+            btn.text('Failed');
+            console.warn('[AnchorMemory] Consolidation error:', err);
+        }
+        renderPanel(getSettings());
+        setTimeout(() => btn.prop('disabled', false).text('Consolidate Now'), 3000);
     });
 }
 

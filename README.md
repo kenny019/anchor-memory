@@ -31,6 +31,11 @@ Out of scope for v1:
 - review queues
 - rebuild-from-history workflows
 
+Product constraint:
+
+- normal RP use should be mostly command-free; slash commands are support tools, not the main memory workflow
+- v1.1 direction is to make scene commits and continuity updates automatic enough that commands feel optional
+
 ## Persisted Model
 
 Per chat, Anchor Memory stores:
@@ -98,3 +103,8 @@ anchor-memory/
   ui/
   commands/
 ```
+
+## Design Notes
+
+- [Supermemory V2 Integration](./docs/SUPERMEMORY_V2.md)
+- [v1.1 Automatic By Default](./docs/V1_1_AUTOMATIC_BY_DEFAULT.md)

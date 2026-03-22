@@ -1,12 +1,15 @@
 import { getContext } from '../../../st-context.js';
 import { getSettings } from '../core/settings.js';
 import { getActiveChatId, getChatState, saveChatState } from '../core/storage.js';
-import { hasEpisodeSpan } from '../models/episodes.js';
+import { hasEpisodeSpan, EPISODE_TYPE } from '../models/episodes.js';
 import { hasSceneCardContent, mergeSceneCard } from '../models/state-cards.js';
 import { extractStateUpdates } from '../writing/extract-state.js';
+import { extractStateWindowed } from '../writing/windowed-extractor.js';
 import { buildEpisodeCandidate } from '../writing/build-episode.js';
+import { consolidateEpisodes, applyConsolidation } from '../writing/consolidate-episodes.js';
+import { createLLMCaller } from '../llm/api.js';
 
-export function processCompletedTurn({
+export async function processCompletedTurn({
     chatState = null,
     recentMessages = [],
     latestAssistantMessage = null,
@@ -14,15 +17,7 @@ export function processCompletedTurn({
     type = 'normal',
 } = {}) {
     const resolvedSettings = Object.keys(settings).length > 0 ? settings : getSettings();
-    if (!resolvedSettings.enabled) {
-        return {
-            episodeCandidate: null,
-            safeUpdates: [],
-        };
-    }
-
-    const skippedTypes = new Set(['swipe', 'continue', 'appendFinal', 'first_message', 'command', 'extension']);
-    if (type !== 'normal' || skippedTypes.has(type)) {
+    if (!resolvedSettings.enabled || type !== 'normal') {
         return {
             episodeCandidate: null,
             safeUpdates: [],
@@ -58,11 +53,18 @@ export function processCompletedTurn({
         };
     }
 
-    const sceneUpdate = extractStateUpdates({
-        chatState: resolvedChatState,
-        recentMessages: normalizedMessages,
-        latestAssistantMessage: finalAssistantMessage,
-    });
+    const sceneUpdate = resolvedSettings.windowedExtraction
+        ? extractStateWindowed({
+            recentMessages: normalizedMessages,
+            chatState: resolvedChatState,
+            windowSize: Number(resolvedSettings.extractionWindowSize) || 8,
+            overlap: Number(resolvedSettings.extractionWindowOverlap) || 3,
+        })
+        : extractStateUpdates({
+            chatState: resolvedChatState,
+            recentMessages: normalizedMessages,
+            latestAssistantMessage: finalAssistantMessage,
+        });
     const nextSceneCard = mergeSceneCard(
         resolvedChatState.sceneCard,
         sceneUpdate,
@@ -83,15 +85,47 @@ export function processCompletedTurn({
         })
         : null;
 
-    const nextState = {
+    let nextState = {
         ...resolvedChatState,
         lastProcessedTurnKey: turnKey,
         sceneCard: nextSceneCard,
     };
 
     if (episodeCandidate && !hasEpisodeSpan(resolvedChatState.episodes, episodeCandidate.messageStart, episodeCandidate.messageEnd)) {
-        nextState.episodes = [...(resolvedChatState.episodes || []), episodeCandidate].slice(-100);
+        const allEpisodes = [...(resolvedChatState.episodes || []), episodeCandidate];
+        const archived = [];
+        const active = [];
+        let eligibleCount = 0;
+        for (const ep of allEpisodes) {
+            if (ep.archived) {
+                archived.push(ep);
+            } else {
+                active.push(ep);
+                if (ep.type !== EPISODE_TYPE.SEMANTIC) eligibleCount++;
+            }
+        }
+        nextState.episodes = [...archived, ...active.slice(-100)];
         nextState.lastEpisodeBoundaryMessageId = episodeCandidate.messageEnd;
+
+        if (resolvedSettings.llmConsolidation && resolvedSettings.autoConsolidation
+            && eligibleCount >= (Number(resolvedSettings.consolidationThreshold) || 60)) {
+            nextState.pendingConsolidation = true;
+        }
+    }
+
+    if (nextState.pendingConsolidation && resolvedSettings.llmConsolidation) {
+        try {
+            const result = await consolidateEpisodes({ chatState: nextState, llmCallFn: createLLMCaller(resolvedSettings) });
+            if (result.archivedIds.length > 0) {
+                nextState = applyConsolidation(nextState, result);
+                console.info(`[AnchorMemory] Consolidated ${result.archivedIds.length} episodes into ${result.newEpisodes.length} semantic memories`);
+            } else {
+                nextState.pendingConsolidation = false;
+            }
+        } catch (error) {
+            console.warn('[AnchorMemory] Auto-consolidation failed:', error?.message);
+            nextState.pendingConsolidation = false;
+        }
     }
 
     saveChatState(chatId, nextState);

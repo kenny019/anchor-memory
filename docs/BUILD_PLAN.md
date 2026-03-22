@@ -53,6 +53,16 @@ Ship a stable SillyTavern extension that improves RP continuity through:
 - per-character automatic state cards
 - rebuild-from-history workflows
 
+## v1.1 Direction
+
+After v1 stabilization, the next product milestone should be making RP memory automatic by default:
+
+- automatic scene-boundary detection
+- rolling scene candidate management
+- confidence-based scene-card updates
+- passive correction UI
+- slash commands demoted to override/debug tools
+
 ## Verification Checklist
 
 - `npm run check`

@@ -1,5 +1,6 @@
 import { getRetrievalSnapshot } from '../core/storage.js';
 import { getSceneCardLines } from '../models/state-cards.js';
+import { episodeStats } from '../models/episodes.js';
 
 export function renderPanel(settings) {
     if (typeof document === 'undefined') return null;
@@ -14,7 +15,7 @@ export function renderPanel(settings) {
         statusEl.textContent = settings.enabled
             ? [
                 `Chat: ${chatState?.chatId || '(none)'}`,
-                `Episodes: ${chatState?.episodes?.length || 0}`,
+                `Episodes: ${(() => { const s = episodeStats(chatState?.episodes); return `${s.active} active, ${s.archived} archived, ${s.semantic} semantic`; })()}`,
                 `Last Turn Key: ${chatState?.lastProcessedTurnKey || '(none)'}`,
                 `Boundary: ${chatState?.lastEpisodeBoundaryMessageId ?? '(none)'}`,
                 '',

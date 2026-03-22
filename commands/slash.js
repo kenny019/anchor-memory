@@ -2,8 +2,10 @@ import { getContext } from '../../../st-context.js';
 import { clearExtensionPrompt, getSettings } from '../core/settings.js';
 import { clearRetrievalSnapshot, getActiveChatId, getChatState, getRetrievalSnapshot, resetChatState, saveChatState } from '../core/storage.js';
 import { prepareGenerationMemory } from '../runtime/generation-hook.js';
-import { hasEpisodeSpan } from '../models/episodes.js';
+import { hasEpisodeSpan, episodeStats, EPISODE_TYPE } from '../models/episodes.js';
 import { buildEpisodeCandidate } from '../writing/build-episode.js';
+import { consolidateEpisodes, applyConsolidation } from '../writing/consolidate-episodes.js';
+import { createLLMCaller } from '../llm/api.js';
 
 let registered = false;
 
@@ -43,6 +45,13 @@ export function registerSlashCommands() {
     }));
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'am-consolidate',
+        callback: async () => runConsolidate(),
+        helpString: 'Consolidate old episodes into semantic memories using LLM.',
+        returns: 'consolidation status',
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'am-reset',
         callback: async () => resetMemory(),
         helpString: 'Clear Anchor Memory metadata for the active chat and reinitialize empty state.',
@@ -58,17 +67,19 @@ function formatStatus() {
     if (chatState.sceneCard.activeGoal) sceneLines.push(`goal=${chatState.sceneCard.activeGoal}`);
     if (chatState.sceneCard.activeConflict) sceneLines.push(`conflict=${chatState.sceneCard.activeConflict}`);
 
+    const stats = episodeStats(chatState.episodes);
+
     return [
         'Anchor Memory Status',
         `chatId: ${chatState.chatId}`,
         `sceneCard: ${sceneLines.length > 0 ? sceneLines.join(' | ') : '(empty)'}`,
-        `episodes: ${chatState.episodes.length}`,
+        `episodes: ${stats.active} active, ${stats.archived} archived, ${stats.semantic} semantic`,
         `lastProcessedTurnKey: ${chatState.lastProcessedTurnKey || '(none)'}`,
         `lastEpisodeBoundaryMessageId: ${chatState.lastEpisodeBoundaryMessageId ?? '(none)'}`,
     ].join('\n');
 }
 
-function previewRetrieval() {
+async function previewRetrieval() {
     const context = getContext();
     const settings = getSettings();
     const chatState = getChatState(getActiveChatId());
@@ -82,7 +93,7 @@ function previewRetrieval() {
         }))
         .slice(-(Number(settings.preserveRecentMessages) || 12));
 
-    const prepared = prepareGenerationMemory({
+    const prepared = await prepareGenerationMemory({
         chatState,
         recentMessages,
         settings,
@@ -141,6 +152,28 @@ function forceSceneBoundary(titleOverride = '') {
     saveChatState(chatId, nextState);
 
     return `Committed scene "${candidate.title}" (${candidate.messageStart}-${candidate.messageEnd}).`;
+}
+
+async function runConsolidate() {
+    const settings = getSettings();
+    const chatId = getActiveChatId();
+    const chatState = getChatState(chatId);
+    const activeEpisodes = (chatState.episodes || []).filter(ep => !ep.archived && ep.type !== EPISODE_TYPE.SEMANTIC);
+
+    if (activeEpisodes.length < 3) {
+        return 'Not enough episodes to consolidate (need at least 3).';
+    }
+
+    const result = await consolidateEpisodes({ chatState, llmCallFn: createLLMCaller(settings) });
+
+    if (result.archivedIds.length === 0) {
+        return 'No clusters found for consolidation.';
+    }
+
+    const nextState = applyConsolidation(chatState, result);
+    saveChatState(chatId, nextState);
+
+    return `Consolidated ${result.archivedIds.length} episodes into ${result.newEpisodes.length} semantic memories.`;
 }
 
 function resetMemory() {

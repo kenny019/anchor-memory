@@ -14,6 +14,28 @@ const DEFAULT_SETTINGS = {
     promptPosition: 'in_chat',
     promptDepth: 1,
     promptRole: 'system',
+
+    // Windowed extraction
+    windowedExtraction: true,
+    extractionWindowSize: 8,
+    extractionWindowOverlap: 3,
+
+    // LLM infrastructure
+    memoryModelSource: '',
+    memoryModel: '',
+
+    // Episode consolidation
+    llmConsolidation: false,
+    consolidationThreshold: 60,
+    autoConsolidation: true,
+
+    // LLM re-ranking
+    llmReranking: false,
+    rerankCandidateCount: 8,
+    rerankTimeoutMs: 5000,
+
+    // Queryable memory tool
+    memoryToolEnabled: false,
 };
 
 export function getDefaultSettings() {

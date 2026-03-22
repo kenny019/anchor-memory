@@ -1,3 +1,15 @@
+export const EPISODE_TYPE = { EPISODE: 'episode', SEMANTIC: 'semantic' };
+
+export function episodeStats(episodes) {
+    let active = 0, archived = 0, semantic = 0;
+    for (const ep of episodes || []) {
+        if (ep.archived) archived++;
+        else active++;
+        if (ep.type === EPISODE_TYPE.SEMANTIC) semantic++;
+    }
+    return { active, archived, semantic };
+}
+
 export function createEpisode({
     id,
     messageStart = 0,
@@ -11,6 +23,8 @@ export function createEpisode({
     createdAtTs = Date.now(),
     pinned = false,
     archived = false,
+    type = 'episode',
+    sourceEpisodeIds = [],
 } = {}) {
     return normalizeEpisode({
         id: id || `ep_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -25,6 +39,8 @@ export function createEpisode({
         createdAtTs,
         pinned,
         archived,
+        type,
+        sourceEpisodeIds,
     });
 }
 
@@ -44,6 +60,8 @@ export function normalizeEpisode(raw) {
         createdAtTs: Number.isFinite(Number(raw.createdAtTs)) ? Number(raw.createdAtTs) : Date.now(),
         pinned: Boolean(raw.pinned),
         archived: Boolean(raw.archived),
+        type: raw.type === EPISODE_TYPE.SEMANTIC ? EPISODE_TYPE.SEMANTIC : EPISODE_TYPE.EPISODE,
+        sourceEpisodeIds: Array.isArray(raw.sourceEpisodeIds) ? raw.sourceEpisodeIds.map(String) : [],
     };
 }
 

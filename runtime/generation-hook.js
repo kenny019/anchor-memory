@@ -8,8 +8,10 @@ import { scoreSceneCard } from '../retrieval/score-state.js';
 import { scoreEpisodes } from '../retrieval/score-episodes.js';
 import { selectMemoryItems } from '../retrieval/selector.js';
 import { formatMemoryBlock } from '../retrieval/formatter.js';
+import { rerankEpisodes } from '../retrieval/reranker.js';
+import { createLLMCaller } from '../llm/api.js';
 
-export function prepareGenerationMemory({
+export async function prepareGenerationMemory({
     chatState,
     recentMessages = [],
     settings = {},
@@ -20,7 +22,16 @@ export function prepareGenerationMemory({
     });
 
     const scoredSceneCard = scoreSceneCard(chatState?.sceneCard || null, queryContext);
-    const scoredEpisodes = scoreEpisodes(chatState?.episodes || [], queryContext);
+    let scoredEpisodes = scoreEpisodes(chatState?.episodes || [], queryContext);
+
+    if (settings.llmReranking && scoredEpisodes.length > 1) {
+        const candidateCount = Number(settings.rerankCandidateCount) || 8;
+        const topCandidates = scoredEpisodes.slice(0, candidateCount);
+        const timeoutMs = Number(settings.rerankTimeoutMs) || 5000;
+        const reranked = await rerankEpisodes({ candidates: topCandidates, queryContext, llmCallFn: createLLMCaller(settings, { timeoutMs }), timeoutMs });
+        scoredEpisodes = [...reranked, ...scoredEpisodes.slice(candidateCount)];
+    }
+
     const selected = selectMemoryItems({
         scoredEpisodes,
         scoredSceneCard,
@@ -40,8 +51,8 @@ export function prepareGenerationMemory({
     };
 }
 
-export function buildGenerationMemoryBlock(args = {}) {
-    return prepareGenerationMemory(args).memoryBlock;
+export async function buildGenerationMemoryBlock(args = {}) {
+    return (await prepareGenerationMemory(args)).memoryBlock;
 }
 
 export async function runGenerationInterceptor(chat = [], _contextSize, _abort, type) {
@@ -61,7 +72,7 @@ export async function runGenerationInterceptor(chat = [], _contextSize, _abort, 
     const chatState = getChatState(chatId);
     const preserveRecent = Number(settings.preserveRecentMessages) || 12;
     const recentMessages = normalizeRecentMessages(chat).slice(-preserveRecent);
-    const prepared = prepareGenerationMemory({
+    const prepared = await prepareGenerationMemory({
         chatState,
         recentMessages,
         settings,
@@ -96,12 +107,13 @@ export async function runGenerationInterceptor(chat = [], _contextSize, _abort, 
 }
 
 function normalizeRecentMessages(chat = []) {
+    const ctx = getContext();
     return chat
         .filter(message => message && !message.is_system)
         .map((message, index) => ({
             id: Number.isFinite(Number(message.messageId)) ? Number(message.messageId) : index,
             isUser: Boolean(message.is_user),
-            name: String(message.name || (message.is_user ? getContext().name1 : getContext().name2) || ''),
+            name: String(message.name || (message.is_user ? ctx.name1 : ctx.name2) || ''),
             text: String(message.mes || ''),
         }));
 }

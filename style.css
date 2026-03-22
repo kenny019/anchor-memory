@@ -34,3 +34,26 @@
   font-size: 12px;
   line-height: 1.4;
 }
+
+.am-hint {
+  font-size: 12px;
+  opacity: 0.6;
+  margin: 0 0 8px;
+}
+
+.am-card h5 {
+  margin: 12px 0 6px;
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.am-card label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.am-card button.menu_button {
+  margin-top: 8px;
+}
