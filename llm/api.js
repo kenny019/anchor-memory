@@ -55,8 +55,13 @@ async function tryServiceCall({ prompt, systemPrompt, maxTokens, modelSource, mo
     if (modelSource) requestData.chat_completion_source = modelSource;
 
     const result = await service.processRequest(requestData, {}, true, signal);
+    console.info('[AnchorMemory] Service response type:', typeof result, result ? Object.keys(result).slice(0, 10) : result);
     if (typeof result === 'string') return result;
     if (result?.choices?.[0]?.message?.content) return result.choices[0].message.content;
+    // Try other common response shapes
+    if (result?.content) return result.content;
+    if (result?.text) return result.text;
+    if (result?.message?.content) return result.message.content;
     throw new Error('Unexpected response shape');
 }
 
