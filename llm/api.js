@@ -20,7 +20,8 @@ export async function callMemoryLLM({
         let text = null;
         try {
             text = await tryServiceCall({ prompt, systemPrompt, maxTokens, modelSource, modelId, signal: controller.signal });
-        } catch {
+        } catch (serviceError) {
+            console.warn('[AnchorMemory] Service call failed, trying quiet prompt:', serviceError?.message);
             text = await tryQuietCall({ prompt, maxTokens });
         }
 
@@ -67,10 +68,7 @@ async function tryQuietCall({ prompt, maxTokens }) {
     }
 
     console.info('[AnchorMemory] Using generateQuietPrompt fallback (no model override)');
-    const result = await generate({
-        quietPrompt: prompt,
-        responseLength: maxTokens,
-    });
+    const result = await generate(prompt, false, false, null, null, maxTokens);
     return result || null;
 }
 
