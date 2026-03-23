@@ -1,6 +1,6 @@
 # Anchor Memory
 
-**Install it. Forget about it. Your AI remembers everything.**
+**Install it. Forget about it. Your AI remembers what matters.**
 
 Anchor Memory is a [SillyTavern](https://github.com/SillyTavern/SillyTavern) extension that gives your AI persistent memory across long roleplay sessions. It tracks where you are, what's happening, and what happened before — then quietly injects the right context before every generation.
 
@@ -74,7 +74,7 @@ Point Anchor Memory at a cheap nano model for dramatically better memory. Set **
 | Retrieval | Keyword scoring | RLM + deep retrieval (reads actual messages to verify) |
 | Consolidation | N/A | Merges old episodes into semantic memories |
 
-Cost: **~$0.13 per 500-turn session** on `openai/gpt-5.4-nano` via OpenRouter.
+Cost: **~$0.13 per 500-turn session** on `openai/gpt-5.4-nano` via OpenRouter. Actual cost varies with model pricing and message length.
 
 ### Setup (Enhanced)
 
@@ -88,7 +88,7 @@ Memory calls go through ST's existing API connection — same key, no separate c
 
 ### RPBench (8 conversations, 40 probes)
 
-Tested on [MiniMaxAI/role-play-bench](https://huggingface.co/datasets/MiniMaxAI/role-play-bench) conversations with auto-generated probes.
+Early results on a small sample. Tested on [MiniMaxAI/role-play-bench](https://huggingface.co/datasets/MiniMaxAI/role-play-bench) conversations with auto-generated probes.
 
 | Configuration | Span Overlap | Answer Containment |
 |---|---|---|
@@ -97,7 +97,7 @@ Tested on [MiniMaxAI/role-play-bench](https://huggingface.co/datasets/MiniMaxAI/
 | LLM Episodes + Keyword | 82.5% | 80.4% |
 | **LLM Episodes + Hybrid** | **90.0%** | **86.8%** |
 
-On reachable probes (excluding data alignment issues): **97.3% accuracy** with LLM+Hybrid.
+On reachable probes (excluding probes where the answer span fell outside the episode window): 97.3% accuracy with LLM+Hybrid. Sample size is small — treat these as directional, not definitive.
 
 ## Settings
 
@@ -137,6 +137,28 @@ You can also inspect state in the browser console:
 ```javascript
 await window.AnchorMemory.getChatState()
 ```
+
+## Comparison with Other Extensions
+
+| | Anchor Memory | [ST-Memory-Enhancement](https://github.com/muyoou/st-memory-enhancement) | [MemoryBooks](https://github.com/aikohanasaki/SillyTavern-MemoryBooks) | [CharMemory](https://github.com/bal-spec/sillytavern-character-memory) | [Timeline Memory](https://github.com/unkarelian/timeline-memory) | Built-in Vectorization |
+|---|---|---|---|---|---|---|
+| **Auto-extract** | Yes (heuristic or LLM) | No (manual tables) | Semi (user marks scenes) | Yes (~20 msgs) | Yes (configurable) | Yes (auto-vectorize) |
+| **Free tier** | Full heuristic mode | Yes (no API) | No | No | No | Free w/ local embeddings |
+| **RP-optimized** | Yes (scenes, threads, episodes) | Partial (generic tables) | Yes (scenes, arcs) | No (character-focused) | Yes (chapters, arcs) | No (raw chunks) |
+| **Retrieval** | Keyword + significance + optional RLM | Direct injection | Keyword or vector | Vector Storage (embeddings) | Agentic tool calls | Cosine similarity |
+| **Group chat** | Not yet | Yes | Yes | Yes | Unknown | Yes |
+| **Community** | New | ~1,100 stars | ~164 stars | ~35 stars | ~30 stars | Built-in |
+
+**Where Anchor Memory fits**: Fully automatic, RP-native memory with zero mandatory API cost. Strongest retrieval pipeline of any ST memory extension. Trade-off: no embedding-based semantic search and no group chat support yet.
+
+## Limitations
+
+- **Heuristic mode is rough** — regex-based scene extraction often captures narrative fragments as locations. The free tier works, but LLM mode is significantly better.
+- **Fixed episode boundaries in heuristic mode** — scenes are committed every ~14 messages regardless of narrative pacing. LLM mode detects actual scene changes.
+- **No group chat support** — currently designed for 1-on-1 roleplay.
+- **100-episode cap** — active episodes are capped at 100. In heuristic mode (no consolidation), old episodes are dropped. LLM mode merges them into semantic memories.
+- **No manual override** — you can't mark scenes or flag important messages. Memory extraction is fully automatic. Use `/am-scene` to force-commit if needed.
+- **No embedding/vector retrieval** — retrieval uses keyword + significance scoring (and optional LLM), not semantic embeddings.
 
 ## Storage
 
