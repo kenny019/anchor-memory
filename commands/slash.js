@@ -10,6 +10,32 @@ import { createLLMCaller } from '../llm/api.js';
 
 let registered = false;
 
+function showDialog(title, content) {
+    const id = 'anchor-memory-dialog';
+    document.getElementById(id)?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = id;
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center';
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:8px;padding:20px;max-width:700px;width:90%;max-height:80vh;overflow-y:auto;font-family:monospace;font-size:13px;white-space:pre-wrap;word-break:break-word';
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #45475a';
+    const titleEl = document.createElement('strong');
+    titleEl.style.fontSize = '15px';
+    titleEl.textContent = title;
+    header.appendChild(titleEl);
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '\u00D7';
+    closeBtn.style.cssText = 'background:none;border:none;color:#cdd6f4;font-size:20px;cursor:pointer;padding:0 4px';
+    closeBtn.onclick = () => overlay.remove();
+    header.appendChild(closeBtn);
+    box.appendChild(header);
+    box.appendChild(document.createTextNode(content));
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+}
+
 export function registerSlashCommands() {
     if (registered) return;
     registered = true;
@@ -19,21 +45,21 @@ export function registerSlashCommands() {
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'am-status',
-        callback: async () => formatStatus(),
+        callback: async () => { const r = formatStatus(); showDialog('Anchor Memory Status', r); return r; },
         helpString: 'Show Anchor Memory status for the active chat.',
         returns: 'status text',
     }));
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'am-retrieve',
-        callback: async () => previewRetrieval(),
+        callback: async () => { const r = await previewRetrieval(); showDialog('Anchor Memory Retrieval', r); return r; },
         helpString: 'Preview the current Anchor Memory injection block.',
         returns: 'memory preview',
     }));
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'am-scene',
-        callback: async (_namedArgs, unnamedArg) => forceSceneBoundary(String(unnamedArg || '').trim()),
+        callback: async (_namedArgs, unnamedArg) => { const r = await forceSceneBoundary(String(unnamedArg || '').trim()); showDialog('Anchor Memory', r); return r; },
         helpString: 'Commit the current buffered scene into episode memory and start a new scene boundary.',
         unnamedArgumentList: [
             SlashCommandArgument.fromProps({
@@ -47,14 +73,14 @@ export function registerSlashCommands() {
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'am-consolidate',
-        callback: async () => runConsolidate(),
+        callback: async () => { const r = await runConsolidate(); showDialog('Anchor Memory', r); return r; },
         helpString: 'Consolidate old episodes into semantic memories using LLM.',
         returns: 'consolidation status',
     }));
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'am-reset',
-        callback: async () => resetMemory(),
+        callback: async () => { const r = resetMemory(); showDialog('Anchor Memory', r); return r; },
         helpString: 'Clear Anchor Memory metadata for the active chat and reinitialize empty state.',
         returns: 'reset status',
     }));
