@@ -4,7 +4,8 @@ const MAX_MESSAGES = 12;
 const MAX_MSG_CHARS = 200;
 
 /**
- * LLM-based scene extraction. Returns null on failure (caller handles fallback).
+ * LLM-based scene extraction + boundary detection.
+ * Returns null on failure (caller handles fallback).
  */
 export async function llmExtractScene({
     recentMessages = [],
@@ -22,11 +23,15 @@ export async function llmExtractScene({
 
     const prevLocation = chatState?.sceneCard?.location || '';
     const prevParticipants = (chatState?.sceneCard?.participants || []).join(', ') || '';
+    const lastBoundary = Number(chatState?.lastEpisodeBoundaryMessageId ?? -1);
+    const messagesSinceBoundary = recentMessages.filter(m => Number(m.id) > lastBoundary).length;
 
     const prompt = `Analyze these recent roleplay messages.
 
 Recent messages (last ${recent.length}):
 ${formatted}
+
+${messagesSinceBoundary} messages have passed since the last episode boundary.
 
 Previous scene state:
 - Location: ${prevLocation || '(none)'}
@@ -34,39 +39,59 @@ Previous scene state:
 
 Return JSON:
 {
-  "location": "specific place name, not a pose or abstract concept, empty string if unclear",
-  "timeContext": "time of day if mentioned, empty string if not",
-  "activeGoal": "what protagonist is currently trying to do, empty string if unclear",
-  "activeConflict": "active tension or opposition, empty string if none",
-  "openThreads": ["unresolved plot question or tension, max 5"],
-  "participants": ["character name currently present in scene"]
+  "scene": {
+    "location": "specific place name, not a pose or abstract concept, empty string if unclear",
+    "timeContext": "time of day if mentioned, empty string if not",
+    "activeGoal": "what protagonist is currently trying to do, empty string if unclear",
+    "activeConflict": "active tension or opposition, empty string if none",
+    "openThreads": ["unresolved plot question or tension, max 5"],
+    "participants": ["character name currently present in scene"]
+  },
+  "boundary": {
+    "shouldCreate": false,
+    "reason": "location_change|significant_event|dramatic_beat",
+    "significance": 3,
+    "title": "short descriptive title for the episode being closed"
+  }
 }
 
 Rules:
 - location must be a concrete place, not an action, pose, or abstract concept
 - openThreads are unresolved narrative questions, NOT every dialogue question
-- participants MUST include ALL speaker names exactly as they appear in the messages (e.g. if messages show "User:" and "Elena:", return ["User", "Elena"])
+- participants MUST include ALL speaker names exactly as they appear in the messages
+- boundary.shouldCreate = true when: a scene/location change occurred, a significant event happened (betrayal, combat, revelation, death), or a natural dramatic beat concluded
 - return empty string for fields you cannot determine`;
 
     try {
-        const result = await llmCallFn({ prompt, systemPrompt: SYSTEM_PROMPT, maxTokens: 250 });
+        const result = await llmCallFn({ prompt, systemPrompt: SYSTEM_PROMPT, maxTokens: 300 });
         if (!result?.text) return null;
 
         const match = String(result.text).match(/\{[\s\S]*\}/);
         if (!match) return null;
 
         const parsed = JSON.parse(match[0]);
+
+        // Handle both nested {scene, boundary} and flat format
+        const scene = parsed.scene || parsed;
+        const boundary = parsed.boundary || null;
+
         return {
-            location: String(parsed.location || ''),
-            timeContext: String(parsed.timeContext || ''),
-            activeGoal: String(parsed.activeGoal || ''),
-            activeConflict: String(parsed.activeConflict || ''),
-            openThreads: Array.isArray(parsed.openThreads)
-                ? parsed.openThreads.map(t => String(t || '')).filter(Boolean).slice(0, 5)
+            location: String(scene.location || ''),
+            timeContext: String(scene.timeContext || ''),
+            activeGoal: String(scene.activeGoal || ''),
+            activeConflict: String(scene.activeConflict || ''),
+            openThreads: Array.isArray(scene.openThreads)
+                ? scene.openThreads.map(t => String(t || '')).filter(Boolean).slice(0, 5)
                 : [],
-            participants: Array.isArray(parsed.participants)
-                ? parsed.participants.map(p => String(p || '')).filter(Boolean).slice(0, 8)
+            participants: Array.isArray(scene.participants)
+                ? scene.participants.map(p => String(p || '')).filter(Boolean).slice(0, 8)
                 : [],
+            boundary: boundary?.shouldCreate ? {
+                shouldCreate: true,
+                reason: String(boundary.reason || ''),
+                significance: Math.max(1, Math.min(5, Number(boundary.significance) || 2)),
+                title: String(boundary.title || ''),
+            } : null,
         };
     } catch (error) {
         console.warn('[AnchorMemory] LLM extraction failed:', error?.message);

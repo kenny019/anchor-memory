@@ -17,7 +17,7 @@ export function scoreEpisodes(episodes, queryContext) {
         .map(episode => {
             let score = 0;
             const reasons = [];
-            score += overlapCount([episode.title, episode.summary], terms) * 2;
+            score += overlapCount([episode.title, episode.summary, ...(episode.keyFacts || [])], terms) * 2;
             const participantScore = overlapCount(episode.participants || [], [...terms, ...participantTerms]);
             const locationScore = overlapCount(episode.locations || [], terms);
             const threadScore = overlapCount(episode.tags || [], [...terms, ...openThreads]);

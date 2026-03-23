@@ -25,6 +25,7 @@ export function createEpisode({
     archived = false,
     type = 'episode',
     sourceEpisodeIds = [],
+    keyFacts = [],
 } = {}) {
     return normalizeEpisode({
         id: id || `ep_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -41,6 +42,7 @@ export function createEpisode({
         archived,
         type,
         sourceEpisodeIds,
+        keyFacts,
     });
 }
 
@@ -62,6 +64,7 @@ export function normalizeEpisode(raw) {
         archived: Boolean(raw.archived),
         type: raw.type === EPISODE_TYPE.SEMANTIC ? EPISODE_TYPE.SEMANTIC : EPISODE_TYPE.EPISODE,
         sourceEpisodeIds: Array.isArray(raw.sourceEpisodeIds) ? raw.sourceEpisodeIds.map(String) : [],
+        keyFacts: Array.isArray(raw.keyFacts) ? raw.keyFacts.map(String) : [],
     };
 }
 

@@ -1,12 +1,13 @@
 import { getContext } from '../../../../st-context.js';
 import { getSettings } from '../core/settings.js';
 import { getActiveChatId, getChatState, saveChatState } from '../core/storage.js';
-import { hasEpisodeSpan, EPISODE_TYPE } from '../models/episodes.js';
+import { createEpisode, hasEpisodeSpan, EPISODE_TYPE } from '../models/episodes.js';
 import { hasSceneCardContent, mergeSceneCard } from '../models/state-cards.js';
 import { extractStateUpdates } from '../writing/extract-state.js';
 import { extractStateWindowed } from '../writing/windowed-extractor.js';
 import { llmExtractScene } from '../writing/llm-extract-state.js';
 import { buildEpisodeCandidate } from '../writing/build-episode.js';
+import { buildLLMEpisodeSummary } from '../writing/llm-summarizer.js';
 import { consolidateEpisodes, applyConsolidation } from '../writing/consolidate-episodes.js';
 import { createLLMCaller } from '../llm/api.js';
 
@@ -66,17 +67,9 @@ export async function processCompletedTurn({
         },
     );
 
-    const episodeCandidate = resolvedSettings.autoCreateEpisodes && type === 'normal'
-        ? await buildEpisodeCandidate({
-            chatState: {
-                ...resolvedChatState,
-                sceneCard: nextSceneCard,
-            },
-            recentMessages: normalizedMessages,
-            settings: resolvedSettings,
-            llmCallFn: resolvedSettings.llmSummarization ? createLLMCaller(resolvedSettings) : null,
-        })
-        : null;
+    const episodeCandidate = await buildEpisode(
+        useLLMExtraction, sceneUpdate, normalizedMessages, resolvedChatState, nextSceneCard, resolvedSettings,
+    );
 
     let nextState = {
         ...resolvedChatState,
@@ -127,6 +120,41 @@ export async function processCompletedTurn({
         episodeCandidate,
         safeUpdates: hasSceneCardContent(nextSceneCard) ? [nextSceneCard] : [],
     };
+}
+
+async function buildEpisode(useLLM, sceneUpdate, messages, chatState, sceneCard, settings) {
+    const lastBoundary = Number(chatState.lastEpisodeBoundaryMessageId ?? -1);
+    const candidates = messages.filter(m => Number(m.id) > lastBoundary);
+
+    if (useLLM) {
+        let boundary = sceneUpdate?.boundary || null;
+        if (candidates.length >= 25) {
+            boundary = { shouldCreate: true, reason: 'forced', significance: 2, title: '' };
+        }
+        if (boundary?.shouldCreate && candidates.length > 0) {
+            const llmCallFn = createLLMCaller(settings);
+            const episodeSummary = await buildLLMEpisodeSummary(candidates, sceneCard, llmCallFn);
+            if (episodeSummary) {
+                return createEpisode({
+                    messageStart: Number(candidates[0].id),
+                    messageEnd: Number(candidates[candidates.length - 1].id),
+                    participants: sceneCard.participants || [],
+                    locations: sceneCard.location ? [sceneCard.location] : [],
+                    ...episodeSummary,
+                });
+            }
+            // LLM summary failed, fall through to heuristic
+        }
+        if (!boundary?.shouldCreate) return null;
+    }
+
+    // Heuristic path
+    return buildEpisodeCandidate({
+        chatState: { ...chatState, sceneCard },
+        recentMessages: messages,
+        settings,
+        llmCallFn: settings.llmSummarization ? createLLMCaller(settings) : null,
+    });
 }
 
 async function extractSceneState(useLLM, messages, chatState, settings, latestAssistantMessage) {
