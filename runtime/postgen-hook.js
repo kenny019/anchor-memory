@@ -55,6 +55,7 @@ export async function processCompletedTurn({
     }
 
     const useLLMExtraction = Boolean(resolvedSettings.memoryModelSource && resolvedSettings.memoryModel);
+    console.info(`[AnchorMemory] Extraction: llm=${useLLMExtraction} modelSource="${resolvedSettings.memoryModelSource || ''}" model="${resolvedSettings.memoryModel || ''}"`);
     const sceneUpdate = await extractSceneState(useLLMExtraction, normalizedMessages, resolvedChatState, resolvedSettings, finalAssistantMessage);
     const nextSceneCard = mergeSceneCard(
         resolvedChatState.sceneCard,
