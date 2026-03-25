@@ -38,7 +38,7 @@ const DEFAULT_SETTINGS = {
     llmSummarization: false,
 
     // RLM retrieval
-    llmRetrieval: false,
+    llmRetrieval: true,
     retrievalChunkSize: 10,
 
     // Memory format
