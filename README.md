@@ -6,6 +6,7 @@ Anchor Memory is a [SillyTavern](https://github.com/SillyTavern/SillyTavern) ext
 
 - **Tracks your scene** — location, time, goals, conflicts, participants, open plot threads
 - **Remembers past events** — automatically creates episode summaries as your story progresses
+- **Never truly forgets** — old memories are archived and searchable, not deleted
 - **Retrieves what matters** — scores and selects the most relevant memories for each generation
 
 No commands to learn. No lorebooks to maintain. Just install and roleplay.
@@ -72,7 +73,8 @@ Point Anchor Memory at a cheap nano model for dramatically better memory. Set **
 | Episode boundaries | Fixed every 14 messages | Detects scene changes, betrayals, dramatic beats |
 | Episode summaries | Last 4 messages truncated | Structured: title, summary, tags, significance, key facts |
 | Retrieval | Keyword scoring | RLM + deep retrieval (reads actual messages to verify) |
-| Consolidation | N/A | Merges old episodes into semantic memories |
+| Consolidation | N/A | Multi-level: events → arcs → themes → meta-narratives |
+| Archived search | N/A | Old memories searchable via recall tool |
 
 Cost: **~$0.13 per 500-turn session** on `openai/gpt-5.4-nano` via OpenRouter. Actual cost varies with model pricing and message length.
 
@@ -121,6 +123,18 @@ On reachable probes (excluding probes where the answer span fell outside the epi
 
 When both are set, all LLM features auto-enable: scene extraction, boundary detection, episode summaries, retrieval, and consolidation.
 
+### Consolidation (Advanced)
+
+These are inside the **Advanced** dropdown. Defaults work well — only change them if you know what you're doing.
+
+| Setting | Default | What it does |
+|---|---|---|
+| **Max consolidation depth** | 3 | How many levels deep memories can be merged (1 = events→arcs only, 3 = events→arcs→themes→meta) |
+| **Min cluster size** | 4 | How many similar episodes are needed before they get merged together |
+| **Archived search** | On | Whether the recall_memory tool can search through old archived episodes |
+| **Archived score penalty** | 0.5 | How much to down-rank archived results (0.5 = they need to be twice as relevant to rank equally) |
+| **Max archived results** | 2 | How many archived episodes can appear in a recall search |
+
 ## Commands
 
 Optional — Anchor Memory works without them. Output appears in a dialog popup.
@@ -130,7 +144,7 @@ Optional — Anchor Memory works without them. Output appears in a dialog popup.
 | `/am-status` | Show current memory state (scene card, episode count, boundary) |
 | `/am-retrieve` | Preview the memory block that would be injected |
 | `/am-scene [title]` | Force-commit current scene into an episode |
-| `/am-consolidate` | Manually consolidate old episodes into semantic memories |
+| `/am-consolidate` | Consolidate episodes across all depth levels (full multi-depth cascade) |
 | `/am-reset` | Clear all Anchor Memory data for the current chat |
 
 You can also inspect state in the browser console:
@@ -140,34 +154,61 @@ await window.AnchorMemory.getChatState()
 
 ## Comparison with Other Extensions
 
-| | Anchor Memory | [ST-Memory-Enhancement](https://github.com/muyoou/st-memory-enhancement) | [MemoryBooks](https://github.com/aikohanasaki/SillyTavern-MemoryBooks) | [CharMemory](https://github.com/bal-spec/sillytavern-character-memory) | [Timeline Memory](https://github.com/unkarelian/timeline-memory) | Built-in Vectorization |
-|---|---|---|---|---|---|---|
-| **Auto-extract** | Yes (heuristic or LLM) | No (manual tables) | Semi (user marks scenes) | Yes (~20 msgs) | Yes (configurable) | Yes (auto-vectorize) |
-| **Free tier** | Full heuristic mode | Yes (no API) | No | No | No | Free w/ local embeddings |
-| **RP-optimized** | Yes (scenes, threads, episodes) | Partial (generic tables) | Yes (scenes, arcs) | No (character-focused) | Yes (chapters, arcs) | No (raw chunks) |
-| **Retrieval** | Keyword + significance + optional RLM | Direct injection | Keyword or vector | Vector Storage (embeddings) | Agentic tool calls | Cosine similarity |
-| **Group chat** | Not yet | Yes | Yes | Yes | Unknown | Yes |
-| **Community** | New | ~1,100 stars | ~164 stars | ~35 stars | ~30 stars | Built-in |
+There are many memory extensions for SillyTavern. Here's how they differ:
 
-**Where Anchor Memory fits**: Fully automatic, RP-native memory with zero mandatory API cost. Strongest retrieval pipeline of any ST memory extension. Trade-off: no embedding-based semantic search and no group chat support yet.
+### Quick Summary
+
+- **Built-in Summarize** — One rolling summary that gets rewritten each time. Simple but lossy — details disappear over time.
+- **Built-in Vectorization** — Stores every message as a vector embedding, retrieves by similarity. No narrative understanding.
+- **[ST-Memory-Enhancement](https://github.com/muyoou/st-memory-enhancement)** (1.1k stars) — Most popular. You manually fill in structured tables (characters, events, items). Great UI, but nothing is automatic.
+- **[MemoryBooks](https://github.com/aikohanasaki/SillyTavern-MemoryBooks)** (167 stars) — Closest competitor for RP. 6-tier consolidation hierarchy (Arc through Epic). But you have to manually mark scene boundaries, and it requires strict JSON model output.
+- **[MessageSummarize](https://github.com/qvink/SillyTavern-MessageSummarize)** (119 stars) — Summarizes each message individually. Good granularity, but no search — you just get the most recent summaries.
+- **[ReMemory](https://github.com/InspectorCaracal/SillyTavern-ReMemory)** (46 stars) — Stores memories as lorebook entries with probabilistic recall (50% chance of firing). Creative concept but relevant memories may not trigger when needed.
+- **[CharMemory](https://github.com/bal-spec/sillytavern-character-memory)** (36 stars) — Extracts facts about characters into Data Bank files, searched via vector embeddings. Character-focused, not narrative-focused.
+- **[Timeline Memory](https://github.com/unkarelian/timeline-memory)** (31 stars) — Organizes memory into chapters the AI can query via tool calls. Requires tool-call-capable models.
+- **[Qdrant Memory](https://github.com/HO-git/st-qdrant-memory)** (24 stars) — Vector search using a Qdrant database. Only extension with cross-chat memory. Requires Docker.
+- **[InlineSummary](https://github.com/KrsityKu/InlineSummary)** (33 stars) — Manually select message ranges to compress into inline summaries. More of a context compression tool than a memory system.
+
+### Detailed Comparison
+
+| | **Anchor Memory** | **ST-Memory-Enhancement** | **MemoryBooks** | **Built-in Summarize** | **Built-in Vectors** |
+|---|---|---|---|---|---|
+| **How it works** | Episodes + scene tracking | Manual structured tables | Lorebook entries from scenes | Single rolling summary | Per-message embeddings |
+| **Automatic?** | Fully automatic | No (you fill tables) | Semi (you mark scenes) | Yes | Yes |
+| **Needs API?** | Optional (free tier works) | No | Yes (always) | Yes | Embedding model only |
+| **Finds old memories** | Keyword + LLM scoring + archived search | Injects everything | Lorebook keyword matching | No (only latest summary) | Vector similarity |
+| **Consolidation** | Multi-level pyramid (events, arcs, themes) | No | 6-tier hierarchy | Rolling (lossy) | No |
+| **Old memories lost?** | No — archived and searchable | Manual management | No — lorebook persists | Yes — details compress away | No — all vectors kept |
+| **RP-optimized** | Yes (scenes, threads, significance) | Partial | Yes (scenes, arcs) | No | No |
+| **Group chat** | Not yet | Yes | Yes | Yes | Yes |
+
+### Where Anchor Memory Fits
+
+Anchor Memory is the only SillyTavern extension that combines fully automatic memory extraction, intelligent retrieval, hierarchical consolidation, and archived episode search — with a free tier that needs no API calls.
+
+The closest competitor is **MemoryBooks**, which has a deeper consolidation hierarchy (6 tiers vs 4) but requires you to manually mark scene boundaries and only works with models that output strict JSON.
+
+**What Anchor Memory doesn't do**: no vector/embedding search (uses keyword + LLM instead), no cross-chat memory (each chat is independent), and no group chat support yet.
 
 ## Limitations
 
 - **Heuristic mode is rough** — regex-based scene extraction often captures narrative fragments as locations. The free tier works, but LLM mode is significantly better.
 - **Fixed episode boundaries in heuristic mode** — scenes are committed every ~14 messages regardless of narrative pacing. LLM mode detects actual scene changes.
 - **No group chat support** — currently designed for 1-on-1 roleplay.
-- **100-episode cap** — active episodes are capped at 100. In heuristic mode (no consolidation), old episodes are dropped. LLM mode merges them into semantic memories.
+- **100-episode active cap** — active episodes are capped at 100, with higher-depth summaries protected from eviction. Archived episodes are kept separately (up to 200) and remain searchable via the recall tool. In heuristic mode (no consolidation), oldest episodes are dropped.
 - **No manual override** — you can't mark scenes or flag important messages. Memory extraction is fully automatic. Use `/am-scene` to force-commit if needed.
 - **No embedding/vector retrieval** — retrieval uses keyword + significance scoring (and optional LLM), not semantic embeddings.
+- **No cross-chat memory** — each chat has its own independent memory. The AI won't remember things from other conversations.
 
 ## Storage
 
-All data stored in SillyTavern's chat metadata (`anchor_memory` key). No separate database. Deleting a chat deletes its memory.
+All data stored in SillyTavern's chat metadata (`anchor_memory` key). No separate database, no Docker, no server. Deleting a chat deletes its memory.
 
 - Scene card: ~1-2 KB (overwritten each turn)
 - Per episode: ~1-2 KB
-- Active episodes capped at 100
-- Typical 500-turn session: ~50-80 KB
+- Active episodes capped at 100 (higher-depth summaries prioritized)
+- Archived episodes capped at 200 (searchable via recall tool)
+- Typical 500-turn session: ~50-100 KB
 
 ## For Developers
 
