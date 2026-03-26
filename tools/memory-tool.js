@@ -62,12 +62,22 @@ async function handleRecallMemory({ query }) {
         sceneCard: chatState?.sceneCard,
     });
 
+    const includeArchived = settings.archivedSearchEnabled !== false;
+    const archivedPenalty = Number(settings.archivedScorePenalty) || 0.5;
+
     const scoredSceneCard = scoreSceneCard(chatState?.sceneCard || null, queryContext);
-    const scoredEpisodes = scoreEpisodes(chatState?.episodes || [], queryContext);
+    const scoredEpisodes = scoreEpisodes(chatState?.episodes || [], queryContext, {
+        includeArchived,
+        archivedPenalty,
+    });
     const selected = selectMemoryItems({
         scoredEpisodes,
         scoredSceneCard,
-        settings: { ...settings, maxEpisodesInjected: Math.max(5, Number(settings.maxEpisodesInjected) || 3) },
+        settings: {
+            ...settings,
+            maxEpisodesInjected: Math.max(5, Number(settings.maxEpisodesInjected) || 3),
+            archivedMaxResults: includeArchived ? (Number(settings.archivedMaxResults) || 2) : 0,
+        },
     });
 
     const memoryBlock = formatMemoryBlock({

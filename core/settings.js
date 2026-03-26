@@ -46,6 +46,17 @@ const DEFAULT_SETTINGS = {
 
     // Queryable memory tool
     memoryToolEnabled: false,
+
+    // Hierarchical consolidation
+    maxConsolidationDepth: 3,
+    consolidationFanout: 4,
+    maxAutoConsolidationDepth: 1,
+
+    // Archived episode search
+    archivedSearchEnabled: true,
+    archivedScorePenalty: 0.5,
+    archivedMaxResults: 2,
+    storageMaxArchived: 200,
 };
 
 export function getDefaultSettings() {

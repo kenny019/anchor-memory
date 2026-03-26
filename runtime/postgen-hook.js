@@ -1,7 +1,7 @@
 import { getContext } from '../../../../st-context.js';
 import { getSettings } from '../core/settings.js';
 import { getActiveChatId, getChatState, saveChatState } from '../core/storage.js';
-import { createEpisode, hasEpisodeSpan, EPISODE_TYPE } from '../models/episodes.js';
+import { createEpisode, hasEpisodeSpan, capActiveEpisodes } from '../models/episodes.js';
 import { hasSceneCardContent, mergeSceneCard } from '../models/state-cards.js';
 import { extractStateUpdates } from '../writing/extract-state.js';
 import { extractStateWindowed } from '../writing/windowed-extractor.js';
@@ -78,33 +78,32 @@ export async function processCompletedTurn({
     };
 
     if (episodeCandidate && !hasEpisodeSpan(resolvedChatState.episodes, episodeCandidate.messageStart, episodeCandidate.messageEnd)) {
-        const allEpisodes = [...(resolvedChatState.episodes || []), episodeCandidate];
-        const archived = [];
-        const active = [];
-        let eligibleCount = 0;
-        for (const ep of allEpisodes) {
-            if (ep.archived) {
-                archived.push(ep);
-            } else {
-                active.push(ep);
-                if (ep.type !== EPISODE_TYPE.SEMANTIC) eligibleCount++;
-            }
-        }
-        nextState.episodes = [...archived, ...active.slice(-100)];
+        nextState.episodes = capActiveEpisodes([...(resolvedChatState.episodes || []), episodeCandidate]);
         nextState.lastEpisodeBoundaryMessageId = episodeCandidate.messageEnd;
 
+        const activeCount = nextState.episodes.filter(ep => !ep.archived).length;
         if (resolvedSettings.llmConsolidation && resolvedSettings.autoConsolidation
-            && eligibleCount >= (Number(resolvedSettings.consolidationThreshold) || 60)) {
+            && activeCount >= (Number(resolvedSettings.consolidationThreshold) || 60)) {
             nextState.pendingConsolidation = true;
         }
     }
 
     if (nextState.pendingConsolidation && resolvedSettings.llmConsolidation) {
         try {
-            const result = await consolidateEpisodes({ chatState: nextState, llmCallFn: createLLMCaller(resolvedSettings) });
+            const maxAutoDepth = Number(resolvedSettings.maxAutoConsolidationDepth) || 1;
+            const result = await consolidateEpisodes({
+                chatState: nextState,
+                llmCallFn: createLLMCaller(resolvedSettings),
+                settings: resolvedSettings,
+                maxDepth: maxAutoDepth,
+            });
             if (result.archivedIds.length > 0) {
                 nextState = applyConsolidation(nextState, result);
                 console.info(`[AnchorMemory] Consolidated ${result.archivedIds.length} episodes into ${result.newEpisodes.length} semantic memories`);
+
+                // Prune archived episodes beyond storageMaxArchived
+                const maxArchived = Number(resolvedSettings.storageMaxArchived) || 200;
+                nextState.episodes = pruneArchived(nextState.episodes, maxArchived);
             } else {
                 nextState.pendingConsolidation = false;
             }
@@ -120,6 +119,44 @@ export async function processCompletedTurn({
         episodeCandidate,
         safeUpdates: hasSceneCardContent(nextSceneCard) ? [nextSceneCard] : [],
     };
+}
+
+/**
+ * Prune archived episodes beyond maxArchived, protecting those referenced by active sourceEpisodeIds.
+ */
+export function pruneArchived(episodes, maxArchived) {
+    // Single pass: split + collect protected IDs
+    const archived = [];
+    const protectedIds = new Set();
+    for (const ep of episodes) {
+        if (ep.archived) {
+            archived.push(ep);
+        } else if (ep.sourceEpisodeIds) {
+            for (const id of ep.sourceEpisodeIds) protectedIds.add(id);
+        }
+    }
+    if (archived.length <= maxArchived) return episodes;
+
+    // Sort archived oldest first for pruning
+    archived.sort((a, b) => a.createdAtTs - b.createdAtTs);
+    const toRemove = new Set();
+    const target = archived.length - maxArchived;
+    let protectedCount = 0;
+
+    for (const ep of archived) {
+        if (toRemove.size >= target) break;
+        if (protectedIds.has(ep.id)) {
+            protectedCount++;
+            continue;
+        }
+        toRemove.add(ep.id);
+    }
+
+    if (protectedCount > 0 && toRemove.size < target) {
+        console.warn(`[AnchorMemory] Archived pruning: ${protectedCount} episodes protected by lineage, ${toRemove.size} pruned`);
+    }
+
+    return toRemove.size > 0 ? episodes.filter(ep => !toRemove.has(ep.id)) : episodes;
 }
 
 async function buildEpisode(useLLM, sceneUpdate, messages, chatState, sceneCard, settings) {

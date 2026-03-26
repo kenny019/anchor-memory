@@ -79,7 +79,7 @@ export async function prepareGenerationMemory({
     const selected = selectMemoryItems({
         scoredEpisodes,
         scoredSceneCard,
-        settings,
+        settings: { ...settings, archivedMaxResults: 0 },
     });
 
     const memoryBlock = formatMemoryBlock({
@@ -133,12 +133,13 @@ export async function runGenerationInterceptor(chat = [], _contextSize, _abort, 
     const memoryBlock = prepared.memoryBlock;
 
     const prompt = createPromptPayload(memoryBlock, settings);
+    const queryText = recentMessages.map(message => message.text).join('\n').slice(0, 1000);
     if (!memoryBlock) {
         setExtensionPrompt(getPromptKey(), '', mapPromptPosition(prompt.position), prompt.depth, false, 0);
         setRetrievalSnapshot(chatId, {
             injectedChars: 0,
             memoryBlock: '',
-            queryText: recentMessages.map(message => message.text).join('\n').slice(0, 1000),
+            queryText,
             selectedEpisodes: [],
             selectedSceneLines: [],
         });
@@ -149,7 +150,7 @@ export async function runGenerationInterceptor(chat = [], _contextSize, _abort, 
     setRetrievalSnapshot(chatId, {
         injectedChars: prompt.text.length,
         memoryBlock: prompt.text,
-        queryText: recentMessages.map(message => message.text).join('\n').slice(0, 1000),
+        queryText,
         selectedEpisodes: prepared.selected.episodes.map(episode => ({
             id: episode.id,
             title: episode.title,

@@ -145,6 +145,31 @@ function bindUi() {
     $('#am_consolidation_threshold').off('input').on('input', function () {
         updateSettings({ consolidationThreshold: toPositiveInt($(this).val(), 60) });
     });
+
+    // Hierarchical consolidation
+    $('#am_max_consolidation_depth').val(settings.maxConsolidationDepth);
+    $('#am_consolidation_fanout').val(settings.consolidationFanout);
+    $('#am_max_consolidation_depth').off('input').on('input', function () {
+        updateSettings({ maxConsolidationDepth: toPositiveInt($(this).val(), 3) });
+    });
+    $('#am_consolidation_fanout').off('input').on('input', function () {
+        updateSettings({ consolidationFanout: toPositiveInt($(this).val(), 4) });
+    });
+
+    // Archived search
+    $('#am_archived_search_enabled').prop('checked', settings.archivedSearchEnabled);
+    $('#am_archived_score_penalty').val(settings.archivedScorePenalty);
+    $('#am_archived_max_results').val(settings.archivedMaxResults);
+    $('#am_archived_search_enabled').off('change').on('change', function () {
+        updateSettings({ archivedSearchEnabled: $(this).prop('checked') });
+    });
+    $('#am_archived_score_penalty').off('input').on('input', function () {
+        const val = parseFloat($(this).val());
+        updateSettings({ archivedScorePenalty: Number.isFinite(val) ? Math.max(0, Math.min(1, val)) : 0.5 });
+    });
+    $('#am_archived_max_results').off('input').on('input', function () {
+        updateSettings({ archivedMaxResults: toPositiveInt($(this).val(), 2) });
+    });
     // RLM retrieval
     $('#am_llm_retrieval').prop('checked', settings.llmRetrieval);
     $('#am_retrieval_chunk_size').val(settings.retrievalChunkSize);
@@ -180,7 +205,8 @@ function bindUi() {
             const chatId = getActiveChatId();
             const chatState = getChatState(chatId);
             const llmCallFn = createLLMCaller(settings);
-            const result = await consolidateEpisodes({ chatState, llmCallFn });
+            const maxDepth = Number(settings.maxConsolidationDepth) || 3;
+            const result = await consolidateEpisodes({ chatState, llmCallFn, settings, maxDepth });
             if (result.archivedIds.length > 0) {
                 const nextState = applyConsolidation(chatState, result);
                 saveChatState(chatId, nextState);

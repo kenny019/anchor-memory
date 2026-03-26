@@ -6,14 +6,14 @@ function overlapCount(values, terms) {
     );
 }
 
-export function scoreEpisodes(episodes, queryContext) {
+export function scoreEpisodes(episodes, queryContext, { includeArchived = false, archivedPenalty = 0.5 } = {}) {
     const terms = queryContext?.terms || [];
     const participantTerms = queryContext?.sceneParticipants || [];
     const sceneLocation = String(queryContext?.location || '').toLowerCase();
     const openThreads = queryContext?.openThreads || [];
 
     return episodes
-        .filter(episode => episode && !episode.archived)
+        .filter(episode => episode && (includeArchived || !episode.archived))
         .map(episode => {
             let score = 0;
             const reasons = [];
@@ -31,10 +31,15 @@ export function scoreEpisodes(episodes, queryContext) {
             if (threadScore > 0) reasons.push('thread_overlap');
             if (Number(episode.significance || 0) >= 4) reasons.push('high_significance');
 
+            // Apply archived penalty
+            const isArchived = Boolean(episode.archived);
+            if (isArchived) score *= archivedPenalty;
+
             return {
                 item: episode,
                 reasons: reasons.length > 0 ? reasons : (score > 0 ? ['episode_match'] : []),
                 score,
+                isArchived,
             };
         })
         .sort((a, b) => b.score - a.score);

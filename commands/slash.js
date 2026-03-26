@@ -3,7 +3,7 @@ import { clearExtensionPrompt, getSettings } from '../core/settings.js';
 import { clearRetrievalSnapshot, getActiveChatId, getChatState, getRetrievalSnapshot, resetChatState, saveChatState } from '../core/storage.js';
 import { hashText } from '../runtime/postgen-hook.js';
 import { prepareGenerationMemory } from '../runtime/generation-hook.js';
-import { hasEpisodeSpan, episodeStats, EPISODE_TYPE } from '../models/episodes.js';
+import { hasEpisodeSpan, episodeStats, formatDepthInfo, capActiveEpisodes } from '../models/episodes.js';
 import { buildEpisodeCandidate } from '../writing/build-episode.js';
 import { consolidateEpisodes, applyConsolidation } from '../writing/consolidate-episodes.js';
 import { createLLMCaller } from '../llm/api.js';
@@ -95,12 +95,13 @@ function formatStatus() {
     if (chatState.sceneCard.activeConflict) sceneLines.push(`conflict=${chatState.sceneCard.activeConflict}`);
 
     const stats = episodeStats(chatState.episodes);
+    const depthInfo = formatDepthInfo(stats.byDepth);
 
     return [
         'Anchor Memory Status',
         `chatId: ${chatState.chatId}`,
         `sceneCard: ${sceneLines.length > 0 ? sceneLines.join(' | ') : '(empty)'}`,
-        `episodes: ${stats.active} active, ${stats.archived} archived, ${stats.semantic} semantic`,
+        `episodes: ${stats.active} active (${depthInfo || '0'}), ${stats.archived} archived`,
         `lastProcessedTurnKey: ${chatState.lastProcessedTurnKey || '(none)'}`,
         `lastEpisodeBoundaryMessageId: ${chatState.lastEpisodeBoundaryMessageId ?? '(none)'}`,
     ].join('\n');
@@ -173,7 +174,7 @@ async function forceSceneBoundary(titleOverride = '') {
 
     const nextState = {
         ...chatState,
-        episodes: [...chatState.episodes, candidate].slice(-100),
+        episodes: capActiveEpisodes([...chatState.episodes, candidate]),
         lastEpisodeBoundaryMessageId: candidate.messageEnd,
     };
     saveChatState(chatId, nextState);
@@ -185,13 +186,14 @@ async function runConsolidate() {
     const settings = getSettings();
     const chatId = getActiveChatId();
     const chatState = getChatState(chatId);
-    const activeEpisodes = (chatState.episodes || []).filter(ep => !ep.archived && ep.type !== EPISODE_TYPE.SEMANTIC);
+    const activeEpisodes = (chatState.episodes || []).filter(ep => !ep.archived);
 
     if (activeEpisodes.length < 3) {
         return 'Not enough episodes to consolidate (need at least 3).';
     }
 
-    const result = await consolidateEpisodes({ chatState, llmCallFn: createLLMCaller(settings) });
+    const maxDepth = Number(settings.maxConsolidationDepth) || 3;
+    const result = await consolidateEpisodes({ chatState, llmCallFn: createLLMCaller(settings), settings, maxDepth });
 
     if (result.archivedIds.length === 0) {
         return 'No clusters found for consolidation.';
@@ -200,7 +202,9 @@ async function runConsolidate() {
     const nextState = applyConsolidation(chatState, result);
     saveChatState(chatId, nextState);
 
-    return `Consolidated ${result.archivedIds.length} episodes into ${result.newEpisodes.length} semantic memories.`;
+    // Count distinct depths consolidated
+    const depths = new Set(result.newEpisodes.map(ep => ep.depth || 1));
+    return `Consolidated ${result.archivedIds.length} episodes across ${depths.size} depth(s) into ${result.newEpisodes.length} semantic memories.`;
 }
 
 function resetMemory() {
