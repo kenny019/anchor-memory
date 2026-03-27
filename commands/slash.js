@@ -2,12 +2,13 @@ import { getContext } from '../../../../st-context.js';
 import { clearExtensionPrompt, getSettings } from '../core/settings.js';
 import { getMemoryInactiveReason, isMemoryConfigured } from '../core/memory-config.js';
 import { normalizeChatMessages, getLatestAssistantMessage, buildTurnKey, resolveStoredMessageId, resolveStoredSpan } from '../core/messages.js';
-import { clearRetrievalSnapshot, getActiveChatId, getChatState, getRetrievalSnapshot, resetChatState, saveChatState } from '../core/storage.js';
+import { clearRetrievalSnapshot, getActiveChatId, getChatState, getRetrievalSnapshot, resetChatState, resetAndStamp, saveChatState } from '../core/storage.js';
 import { prepareGenerationMemory } from '../runtime/generation-hook.js';
 import { createEpisode, hasEpisodeSpan, episodeStats, formatDepthInfo, capActiveEpisodes, pruneArchivedEpisodes } from '../models/episodes.js';
 import { consolidateEpisodes, applyConsolidation } from '../writing/consolidate-episodes.js';
 import { buildLLMEpisodeSummary } from '../writing/llm-summarizer.js';
 import { createLLMCaller } from '../llm/api.js';
+import { runBackfill } from './backfill.js';
 
 let registered = false;
 
@@ -84,6 +85,13 @@ export function registerSlashCommands() {
         callback: async () => { const r = resetMemory(); showDialog('Anchor Memory', r); return r; },
         helpString: 'Clear Anchor Memory metadata for the active chat and reinitialize empty state.',
         returns: 'reset status',
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'am-init',
+        callback: async () => { await runBackfill(); return ''; },
+        helpString: 'Bulk-backfill chat history into Anchor Memory. Resets existing state.',
+        returns: '',
     }));
 }
 
@@ -229,21 +237,12 @@ function resetMemory() {
     const chatId = getActiveChatId();
     const context = getContext();
     const messages = normalizeChatMessages(context.chat || [], context);
+    const lastAssistant = messages.length > 0 ? getLatestAssistantMessage(messages) : null;
 
-    resetChatState(chatId);
-
-    // Stamp current turn key + boundary so processCompletedTurn skips old messages
-    if (messages.length > 0) {
-        const chatState = getChatState(chatId);
-        const lastAssistant = getLatestAssistantMessage(messages);
-        if (lastAssistant) {
-            chatState.lastProcessedTurnKey = buildTurnKey(lastAssistant);
-        }
-        chatState.lastEpisodeBoundaryMessageId = messages[messages.length - 1].id;
-        saveChatState(chatId, chatState);
-    }
-
-    clearRetrievalSnapshot(chatId);
+    resetAndStamp(chatId, {
+        lastProcessedTurnKey: lastAssistant ? buildTurnKey(lastAssistant) : '',
+        lastEpisodeBoundaryMessageId: messages.length > 0 ? messages[messages.length - 1].id : null,
+    });
     clearExtensionPrompt();
     return `Reset Anchor Memory for chat "${chatId}".`;
 }

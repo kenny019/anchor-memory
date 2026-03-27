@@ -93,3 +93,17 @@ export function getRetrievalSnapshot(chatId = getActiveChatId()) {
 export function clearRetrievalSnapshot(chatId = getActiveChatId()) {
     retrievalSnapshotStore.delete(chatId);
 }
+
+/**
+ * Reset chat state and stamp forward markers to prevent processCompletedTurn
+ * from racing with the caller. Returns the stamped chatState.
+ */
+export function resetAndStamp(chatId, { lastProcessedTurnKey = '', lastEpisodeBoundaryMessageId = null } = {}) {
+    resetChatState(chatId);
+    clearRetrievalSnapshot(chatId);
+    const chatState = getChatState(chatId);
+    if (lastProcessedTurnKey) chatState.lastProcessedTurnKey = lastProcessedTurnKey;
+    if (lastEpisodeBoundaryMessageId != null) chatState.lastEpisodeBoundaryMessageId = lastEpisodeBoundaryMessageId;
+    saveChatState(chatId, chatState);
+    return chatState;
+}
