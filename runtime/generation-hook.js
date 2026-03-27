@@ -3,7 +3,8 @@ import { getContext } from '../../../../st-context.js';
 import { getSettings, getPromptKey } from '../core/settings.js';
 import { getChatState, getActiveChatId, setRetrievalSnapshot, clearRetrievalSnapshot } from '../core/storage.js';
 import { isMemoryConfigured } from '../core/memory-config.js';
-import { normalizeChatMessages } from '../core/messages.js';
+import { normalizeChatMessages, getLatestAssistantMessage } from '../core/messages.js';
+import { processCompletedTurn } from './postgen-hook.js';
 import { createPromptPayload } from '../integration/prompt-injection.js';
 import { createLLMCaller } from '../llm/api.js';
 import { prepareGenerationMemoryData } from './prepare-memory.js';
@@ -38,6 +39,24 @@ export async function runGenerationInterceptor(chat = [], _contextSize, _abort, 
 
     if (type === 'quiet') {
         return;
+    }
+
+    // Process previous confirmed turn — user sending a new message confirms the last AI response
+    // Truncate messages at the latest assistant message to match MESSAGE_RECEIVED behavior
+    // (context.chat now includes the new user message that triggered this generation)
+    if (!type || type === 'normal') {
+        try {
+            const ctx = getContext();
+            const allMsgs = normalizeChatMessages(ctx.chat, ctx);
+            const lastAssistant = getLatestAssistantMessage(allMsgs);
+            if (lastAssistant) {
+                const truncIdx = allMsgs.findIndex(m => m === lastAssistant);
+                const truncated = allMsgs.slice(0, truncIdx + 1);
+                await processCompletedTurn({ recentMessages: truncated, latestAssistantMessage: lastAssistant });
+            }
+        } catch (err) {
+            console.warn('[AnchorMemory] Deferred turn processing failed:', err?.message);
+        }
     }
 
     const chatId = getActiveChatId();

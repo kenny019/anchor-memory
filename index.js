@@ -26,7 +26,6 @@ export async function initAnchorMemory() {
     const settings = getSettings();
     registerEventHooks({
         onBeforeGenerate: runGenerationInterceptor,
-        onAfterGenerate: processCompletedTurn,
     });
 
     if (!document.getElementById('anchor_memory_settings')) {
@@ -193,8 +192,7 @@ function bindRuntimeEvents() {
         renderPanel(getSettings());
     });
 
-    eventSource.on(event_types.MESSAGE_RECEIVED, async (_messageId, type) => {
-        await processCompletedTurn({ type });
+    eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
         renderPanel(getSettings());
     });
 
