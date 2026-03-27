@@ -668,6 +668,92 @@ import { computeEffectiveBudget } from '../core/budget.js';
 }
 
 // ==========================================
+// Group 8: Dossier Gate & Message Budget
+// ==========================================
+console.log('\n=== Group 8: Dossier Gate & Message Budget ===\n');
+
+import { formatMessagesForLLM } from '../writing/format-messages.js';
+
+{
+    // getActiveDossiers returns participant dossiers first, fills with recent non-participants
+    _resetForTesting();
+    dossierStore.applyCharacterDeltas('dg-chat1', [
+        { name: 'Luna', relationship: 'companion' },
+        { name: 'Kael', relationship: 'rival' },
+        { name: 'Briza', relationship: 'npc' },
+    ], { messageId: 50 });
+    const active = dossierStore.getActiveDossiers('dg-chat1', ['Luna'], { currentMessageId: 55 });
+    assert('getActiveDossiers: participant first, fills with recent non-participants',
+        active.length === 3 && active[0].name === 'Luna');
+}
+
+{
+    // getActiveDossiers excludes narrator dossiers
+    _resetForTesting();
+    dossierStore.applyCharacterDeltas('dg-chat2', [
+        { name: 'Luna', relationship: 'companion' },
+    ], { messageId: 50 });
+    // Manually inject a narrator dossier (bypassing applyCharacterDeltas skip)
+    dossierStore.saveDossier('dg-chat2', 'Narrator', normalizeDossier({ name: 'Narrator', lastSeenMessageId: 50 }));
+    const active = dossierStore.getActiveDossiers('dg-chat2', ['Luna', 'Narrator'], { currentMessageId: 55 });
+    assert('getActiveDossiers excludes narrator dossiers',
+        active.length === 1 && active[0].name === 'Luna');
+}
+
+{
+    // applyCharacterDeltas skips narrator entries
+    _resetForTesting();
+    dossierStore.applyCharacterDeltas('dg-chat3', [
+        { name: 'Narrator', relationship: 'meta' },
+        { name: 'System', relationship: 'meta' },
+        { name: 'Luna', relationship: 'companion' },
+    ], { messageId: 10 });
+    const all = dossierStore.getAllDossiers('dg-chat3');
+    assert('applyCharacterDeltas skips narrator and system entries',
+        Object.keys(all).length === 1 && all['luna']?.name === 'Luna');
+}
+
+{
+    // formatMessagesForLLM at budget 12000 does not truncate 12 messages of ~900 chars (typical RP)
+    const msgs = Array.from({ length: 12 }, (_, i) => ({
+        name: `Char${i}`,
+        text: 'A'.repeat(900),
+        isUser: i % 2 === 0,
+    }));
+    const formatted = formatMessagesForLLM(msgs, { totalBudget: 12000, maxMessages: 12 });
+    const hasTruncation = formatted.includes('...');
+    assert('formatMessagesForLLM at 12000 budget: no truncation for 12×900 char messages',
+        !hasTruncation);
+}
+
+{
+    // Budget 3500 WOULD truncate those same messages (regression guard)
+    const msgs = Array.from({ length: 12 }, (_, i) => ({
+        name: `Char${i}`,
+        text: 'A'.repeat(900),
+        isUser: i % 2 === 0,
+    }));
+    const formatted = formatMessagesForLLM(msgs, { totalBudget: 3500, maxMessages: 12 });
+    const hasTruncation = formatted.includes('...');
+    assert('formatMessagesForLLM at old 3500 budget: truncates 12×900 char messages',
+        hasTruncation);
+}
+
+{
+    // Recency fill respects the 20-message threshold
+    _resetForTesting();
+    dossierStore.applyCharacterDeltas('dg-chat4', [
+        { name: 'Recent', relationship: 'npc' },
+    ], { messageId: 90 });
+    dossierStore.applyCharacterDeltas('dg-chat4', [
+        { name: 'Old', relationship: 'npc' },
+    ], { messageId: 50 });
+    const active = dossierStore.getActiveDossiers('dg-chat4', [], { currentMessageId: 100 });
+    assert('getActiveDossiers recency fill: only includes dossiers within 20 messages',
+        active.length === 1 && active[0].name === 'Recent');
+}
+
+// ==========================================
 // Summary
 // ==========================================
 

@@ -64,7 +64,9 @@ export async function prepareGenerationMemoryData({
     let dossiers = [];
     if (chatId) {
         try {
-            dossiers = getActiveDossiers(chatId, chatState?.sceneCard?.participants || []);
+            const lastMsg = recentMessages.length > 0 ? recentMessages[recentMessages.length - 1] : null;
+            const currentMessageId = Number(lastMsg?.id) || 0;
+            dossiers = getActiveDossiers(chatId, chatState?.sceneCard?.participants || [], { currentMessageId });
         } catch { /* fail-open */ }
     }
 

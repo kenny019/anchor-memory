@@ -16,7 +16,7 @@ export async function llmExtractScene({
     if (typeof llmCallFn !== 'function') return null;
 
     const recent = recentMessages.slice(-MAX_MESSAGES);
-    const formatted = formatMessagesForLLM(recent, { totalBudget: 3500, maxMessages: MAX_MESSAGES });
+    const formatted = formatMessagesForLLM(recent, { totalBudget: 12000, maxMessages: MAX_MESSAGES });
 
     const prevLocation = chatState?.sceneCard?.location || '';
     const prevParticipants = (chatState?.sceneCard?.participants || []).join(', ') || '';
@@ -68,13 +68,13 @@ Rules:
 - openThreads are unresolved narrative questions, NOT every dialogue question
 - participants MUST include ALL speaker names exactly as they appear in the messages
 - boundary.shouldCreate = true when: a scene/location change occurred, a significant event happened (betrayal, combat, revelation, death), or a natural dramatic beat concluded
-- characters: only include characters who DID something or REVEALED something this turn
-- characters.knownInfo: only NEW facts, not previously known information
-- do not include characters merely mentioned in passing
+- characters: include all named characters currently present in the scene (speaking, acting, or observing)
+- characters.knownInfo: only NEW facts learned this turn
+- omit characters merely referenced in dialogue but not physically present
 - return empty string for fields you cannot determine`;
 
     try {
-        const result = await llmCallFn({ prompt, systemPrompt: SYSTEM_PROMPT, maxTokens: 450 });
+        const result = await llmCallFn({ prompt, systemPrompt: SYSTEM_PROMPT, maxTokens: 600 });
         if (!result?.text) return null;
 
         const match = String(result.text).match(/\{[\s\S]*\}/);

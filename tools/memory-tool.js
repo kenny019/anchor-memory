@@ -98,7 +98,8 @@ async function handleRecallMemory({ query }) {
 
     let dossiers = [];
     try {
-        dossiers = getActiveDossiers(chatId, chatState?.sceneCard?.participants || []);
+        const currentMessageId = Number(chatState?.lastEpisodeBoundaryMessageId) || 0;
+        dossiers = getActiveDossiers(chatId, chatState?.sceneCard?.participants || [], { currentMessageId });
     } catch { /* fail-open */ }
 
     const result = formatToolResult({

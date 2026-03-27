@@ -2,6 +2,7 @@ import { getCached, setCached, COL_DOSSIERS } from './localforage-store.js';
 import { normalizeDossierKey, normalizeDossier, mergeDossier } from '../models/dossiers.js';
 
 const MAX_CHARACTERS = 15;
+const MAX_ACTIVE_DOSSIERS = 8;
 
 export function getAllDossiers(chatId) {
     return getCached(chatId, COL_DOSSIERS) || {};
@@ -29,14 +30,36 @@ export function deleteDossier(chatId, name) {
     setCached(chatId, COL_DOSSIERS, all);
 }
 
-export function getActiveDossiers(chatId, participantNames = []) {
+const SKIP_NAMES = new Set(['narrator', 'system'].map(normalizeDossierKey));
+
+export function getActiveDossiers(chatId, participantNames = [], { currentMessageId = 0 } = {}) {
     const all = getAllDossiers(chatId);
     const keys = participantNames.map(normalizeDossierKey).filter(Boolean);
+    const included = new Set();
     const result = [];
+
+    // Priority: participants with dossiers (skip meta-names)
     for (const key of keys) {
-        if (all[key]) result.push(all[key]);
-        if (result.length >= 8) break;
+        if (SKIP_NAMES.has(key)) continue;
+        if (all[key]) {
+            result.push(all[key]);
+            included.add(key);
+        }
+        if (result.length >= MAX_ACTIVE_DOSSIERS) return result;
     }
+
+    // Fill: recently-seen dossiers not already included
+    if (currentMessageId > 0 && result.length < 8) {
+        const recencyThreshold = currentMessageId - 20;
+        const recent = Object.entries(all)
+            .filter(([key, d]) => !included.has(key) && !SKIP_NAMES.has(key) && d.lastSeenMessageId >= recencyThreshold)
+            .sort((a, b) => b[1].lastSeenMessageId - a[1].lastSeenMessageId);
+        for (const [, dossier] of recent) {
+            result.push(dossier);
+            if (result.length >= MAX_ACTIVE_DOSSIERS) break;
+        }
+    }
+
     return result;
 }
 
@@ -49,7 +72,7 @@ export function applyCharacterDeltas(chatId, deltas, meta = {}) {
         const name = String(delta?.name || '').trim();
         if (!name) continue;
         const key = normalizeDossierKey(name);
-        if (!key) continue;
+        if (!key || SKIP_NAMES.has(key)) continue;
 
         const existing = all[key];
         if (!existing && count >= MAX_CHARACTERS) continue;
