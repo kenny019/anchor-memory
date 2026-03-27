@@ -29,7 +29,7 @@ function parseRefineResponse(text) {
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) return null;
     try {
-        const parsed = JSON.parse(match[0]);
+        const parsed = JSON.parse(match[0].replace(/,\s*([}\]])/g, '$1'));
         const terms = Array.isArray(parsed.terms) ? parsed.terms.filter(t => typeof t === 'string') : [];
         const entities = Array.isArray(parsed.entities) ? parsed.entities.filter(e => typeof e === 'string') : [];
         return { terms, entities };

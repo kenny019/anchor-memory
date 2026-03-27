@@ -39,7 +39,7 @@ Focus on: what changed, who did what to whom, what remains unresolved, why it ma
         const match = String(result.text).match(/\{[\s\S]*\}/);
         if (!match) return null;
 
-        const parsed = JSON.parse(match[0]);
+        const parsed = JSON.parse(match[0].replace(/,\s*([}\]])/g, '$1'));
         return {
             title: String(parsed.title || '').slice(0, 80),
             summary: String(parsed.summary || '').slice(0, 600),

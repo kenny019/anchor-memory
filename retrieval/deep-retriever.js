@@ -88,7 +88,7 @@ function parseResponse(text) {
     try {
         const match = text.match(/\{[\s\S]*\}/);
         if (!match) return null;
-        const obj = JSON.parse(match[0]);
+        const obj = JSON.parse(match[0].replace(/,\s*([}\]])/g, '$1'));
         const s = Math.max(1, Math.min(10, Number(obj.s) || 0));
         if (!s) return null;
         return { s, reason: String(obj.reason || '') };

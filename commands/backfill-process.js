@@ -60,7 +60,9 @@ export async function processChunk(messages, chunkIndex, totalChunks, llmCallFn)
 
         const match = text.match(/\{[\s\S]*\}/);
         if (!match) return null;
-        const parsed = JSON.parse(match[0]);
+        // Strip trailing commas before ] or } (common LLM JSON mistake)
+        const sanitized = match[0].replace(/,\s*([}\]])/g, '$1');
+        const parsed = JSON.parse(sanitized);
 
         const ep = parsed.episode || {};
         const firstMsg = messages[0];

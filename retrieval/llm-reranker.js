@@ -95,7 +95,7 @@ function parseChunkResponse(text, chunk) {
     try {
         const match = text.match(/\[[\s\S]*\]/);
         if (!match) return [];
-        const items = JSON.parse(match[0]);
+        const items = JSON.parse(match[0].replace(/,\s*([}\]])/g, '$1'));
         if (!Array.isArray(items)) return [];
 
         const hits = [];

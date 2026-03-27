@@ -169,7 +169,7 @@ function parseConsolidationResponse(text) {
     try {
         const match = text.match(/\{[\s\S]*\}/);
         if (!match) return null;
-        return JSON.parse(match[0]);
+        return JSON.parse(match[0].replace(/,\s*([}\]])/g, '$1'));
     } catch {
         return null;
     }
