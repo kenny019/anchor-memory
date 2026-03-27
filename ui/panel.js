@@ -1,4 +1,5 @@
 import { getRetrievalSnapshot } from '../core/storage.js';
+import { getMemoryInactiveReason, isMemoryConfigured } from '../core/memory-config.js';
 import { getSceneCardLines } from '../models/state-cards.js';
 import { episodeStats, formatDepthInfo } from '../models/episodes.js';
 
@@ -12,16 +13,19 @@ export function renderPanel(settings) {
     const statusEl = document.getElementById('am_status');
     if (statusEl) {
         const sceneLines = chatState ? getSceneCardLines(chatState.sceneCard) : [];
+        const configured = isMemoryConfigured(settings);
         statusEl.textContent = settings.enabled
             ? [
                 `Chat: ${chatState?.chatId || '(none)'}`,
+                `Configured: ${configured ? 'Yes' : 'No'}`,
+                !configured ? `Inactive: ${getMemoryInactiveReason(settings)}` : null,
                 `Episodes: ${(() => { const s = episodeStats(chatState?.episodes); return `${s.active} active (${formatDepthInfo(s.byDepth)}), ${s.archived} archived`; })()}`,
                 `Last Turn Key: ${chatState?.lastProcessedTurnKey || '(none)'}`,
                 `Boundary: ${chatState?.lastEpisodeBoundaryMessageId ?? '(none)'}`,
                 '',
                 'Scene:',
                 ...(sceneLines.length > 0 ? sceneLines.map(line => `- ${line}`) : ['- (empty)']),
-            ].join('\n')
+            ].filter(Boolean).join('\n')
             : 'Anchor Memory loaded but disabled.';
     }
 

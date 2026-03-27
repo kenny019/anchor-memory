@@ -19,18 +19,19 @@ export function clusterEpisodesAtDepth(episodes, targetDepth, { fanout = DEFAULT
         if (assigned.has(eligible[i].id)) continue;
 
         const cluster = [eligible[i]];
-        assigned.add(eligible[i].id);
+        const clusterIds = new Set([eligible[i].id]);
 
         for (let j = i + 1; j < eligible.length; j++) {
             if (assigned.has(eligible[j].id)) continue;
             if (jaccardSimilarity(tokenSets[i], tokenSets[j]) >= threshold) {
                 cluster.push(eligible[j]);
-                assigned.add(eligible[j].id);
+                clusterIds.add(eligible[j].id);
             }
         }
 
         if (cluster.length >= fanout) {
             clusters.push(cluster);
+            for (const id of clusterIds) assigned.add(id);
         }
     }
 

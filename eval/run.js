@@ -1,264 +1,187 @@
-import { extractStateUpdates } from '../writing/extract-state.js';
-import { extractStateWindowed } from '../writing/windowed-extractor.js';
-import { buildEpisodeCandidate } from '../writing/build-episode.js';
-import { createEpisode } from '../models/episodes.js';
-import { createSceneCard, mergeSceneCard } from '../models/state-cards.js';
-import { buildQueryContext } from '../retrieval/query-builder.js';
-import { scoreSceneCard } from '../retrieval/score-state.js';
-import { scoreEpisodes } from '../retrieval/score-episodes.js';
-import { selectMemoryItems } from '../retrieval/selector.js';
-import { formatMemoryBlock } from '../retrieval/formatter.js';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { isMemoryConfigured, getMemoryInactiveReason } from '../core/memory-config.js';
 import {
-    CHAT_MESSAGES,
-    CHECKPOINTS,
-    EPISODE_EXPECTATIONS,
-    RETRIEVAL_QUERIES,
-    NOISE_TEST,
-} from './fixture.js';
+    normalizeChatMessages,
+    resolveStoredMessageId,
+    resolveStoredSpan,
+    getMessagesForStoredEpisode,
+    buildTurnKey,
+    buildLegacyTurnKey,
+} from '../core/messages.js';
+import { createEpisode, pruneArchivedEpisodes } from '../models/episodes.js';
+import { clusterEpisodesAtDepth } from '../writing/consolidate-episodes.js';
+import { prepareGenerationMemoryData } from '../runtime/prepare-memory.js';
 
-// --- Scoring helpers ---
-
-function fieldMatch(extracted, expected) {
-    if (!expected && !extracted) return true;
-    if (!expected) return true;
-    if (!extracted) return false;
-    return String(extracted).toLowerCase().includes(String(expected).toLowerCase());
-}
-
-function participantsMatch(extracted, expected) {
-    if (!expected || expected.length === 0) return true;
-    const extractedLower = (extracted || []).map(p => p.toLowerCase());
-    return expected.every(p => extractedLower.some(e => e.includes(p.toLowerCase())));
-}
-
-function threadsMatch(extracted, expected) {
-    if (!expected || expected.length === 0) return true;
-    const joined = (extracted || []).join(' ').toLowerCase();
-    return expected.every(t => joined.includes(t.toLowerCase()));
-}
-
-// --- Test runner ---
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(__dirname, '..');
 
 let totalPassed = 0;
 let totalFailed = 0;
 const failures = [];
 
-function assert(testGroup, name, condition, detail = '') {
+function assert(name, condition, detail = '') {
     if (condition) {
         totalPassed++;
+        console.log(`  PASS  ${name}`);
     } else {
         totalFailed++;
-        failures.push(`[${testGroup}] ${name}${detail ? ': ' + detail : ''}`);
-    }
-    const icon = condition ? '  PASS' : '  FAIL';
-    console.log(`${icon}  ${name}${detail && !condition ? ' — ' + detail : ''}`);
-}
-
-function msgsUpTo(id) {
-    return CHAT_MESSAGES.filter(m => m.id <= id);
-}
-
-// --- Test 1: Flat extraction accuracy ---
-
-console.log('\n=== Test 1: Flat Extraction ===');
-
-for (const cp of CHECKPOINTS) {
-    console.log(`\n  Checkpoint: ${cp.label} (after msg ${cp.afterMessageId})`);
-    const messages = msgsUpTo(cp.afterMessageId);
-    const result = extractStateUpdates({ recentMessages: messages });
-
-    assert('extraction', `${cp.label} — location`, fieldMatch(result.location, cp.expected.location),
-        `got "${result.location}", want "${cp.expected.location}"`);
-
-    if (cp.expected.timeContext) {
-        assert('extraction', `${cp.label} — timeContext`, fieldMatch(result.timeContext, cp.expected.timeContext),
-            `got "${result.timeContext}", want "${cp.expected.timeContext}"`);
-    }
-    if (cp.expected.activeGoal) {
-        assert('extraction', `${cp.label} — activeGoal`, fieldMatch(result.activeGoal, cp.expected.activeGoal),
-            `got "${result.activeGoal}", want "${cp.expected.activeGoal}"`);
-    }
-    if (cp.expected.activeConflict) {
-        assert('extraction', `${cp.label} — activeConflict`, fieldMatch(result.activeConflict, cp.expected.activeConflict),
-            `got "${result.activeConflict}", want "${cp.expected.activeConflict}"`);
-    }
-    assert('extraction', `${cp.label} — participants`, participantsMatch(result.participants, cp.expected.participants),
-        `got [${result.participants}], want [${cp.expected.participants}]`);
-
-    if (cp.expected.openThreads.length > 0) {
-        assert('extraction', `${cp.label} — openThreads`, threadsMatch(result.openThreads, cp.expected.openThreads),
-            `got [${result.openThreads.join('; ')}], want [${cp.expected.openThreads}]`);
+        failures.push(`${name}${detail ? ': ' + detail : ''}`);
+        console.log(`  FAIL  ${name}${detail ? ' — ' + detail : ''}`);
     }
 }
 
-// --- Test 2: Windowed extraction ---
+console.log('\n=== Test 1: Memory Configuration ===\n');
 
-console.log('\n=== Test 2: Windowed Extraction ===');
+assert('Unconfigured settings disable memory', !isMemoryConfigured({ memoryModelSource: '', memoryModel: '' }));
+assert(
+    'Unconfigured settings expose clear reason',
+    getMemoryInactiveReason({ memoryModelSource: '', memoryModel: '' }).toLowerCase().includes('configure'),
+);
+assert(
+    'Configured settings enable memory',
+    isMemoryConfigured({ memoryModelSource: 'openrouter', memoryModel: 'openai/gpt-5.4-nano' }),
+);
 
-for (const cp of CHECKPOINTS) {
-    console.log(`\n  Checkpoint: ${cp.label} (after msg ${cp.afterMessageId})`);
-    const messages = msgsUpTo(cp.afterMessageId);
-    const result = extractStateWindowed({ recentMessages: messages, windowSize: 8, overlap: 3 });
+console.log('\n=== Test 2: Message Normalization and Legacy Span Compatibility ===\n');
 
-    assert('windowed', `${cp.label} — location`, fieldMatch(result.location, cp.expected.location),
-        `got "${result.location}", want "${cp.expected.location}"`);
+const rawMessages = [
+    { messageId: 100, is_user: true, name: 'User', mes: 'We enter the cellar.' },
+    { messageId: 101, is_user: false, name: 'Elena', mes: 'I do not trust this place.' },
+    { messageId: 102, is_user: true, name: 'User', mes: 'Elena betrayed me with a dagger.' },
+    { messageId: 103, is_user: false, name: 'Elena', mes: 'The Order sent me.' },
+];
+const normalized = normalizeChatMessages(rawMessages, { name1: 'User', name2: 'Elena' });
 
-    if (cp.expected.timeContext) {
-        assert('windowed', `${cp.label} — timeContext`, fieldMatch(result.timeContext, cp.expected.timeContext),
-            `got "${result.timeContext}", want "${cp.expected.timeContext}"`);
-    }
-    if (cp.expected.activeGoal) {
-        assert('windowed', `${cp.label} — activeGoal`, fieldMatch(result.activeGoal, cp.expected.activeGoal),
-            `got "${result.activeGoal}", want "${cp.expected.activeGoal}"`);
-    }
-    assert('windowed', `${cp.label} — participants`, participantsMatch(result.participants, cp.expected.participants),
-        `got [${result.participants}], want [${cp.expected.participants}]`);
-}
+assert('Canonical IDs come from messageId', normalized[0].id === 100 && normalized[3].id === 103);
+assert('Legacy indices are preserved', normalized[2].legacyIndex === 2);
+assert('Legacy stored boundary resolves to canonical ID', resolveStoredMessageId(2, normalized) === 102);
 
-// Windowed should correctly identify location at checkpoint 3
-const noiseCp = CHECKPOINTS[NOISE_TEST.checkpointIndex];
-const noiseMessages = msgsUpTo(noiseCp.afterMessageId);
-const noiseResult = extractStateWindowed({ recentMessages: noiseMessages, windowSize: 8, overlap: 3 });
-assert('windowed', 'Windowed location accuracy at tunnels checkpoint',
-    fieldMatch(noiseResult.location, NOISE_TEST.correctLocation),
-    `got "${noiseResult.location}", want "${NOISE_TEST.correctLocation}"`);
+const legacyEpisode = { messageStart: 2, messageEnd: 3 };
+const canonicalSpan = resolveStoredSpan(legacyEpisode, normalized);
+assert('Legacy span resolves to canonical IDs', canonicalSpan?.start === 102 && canonicalSpan?.end === 103);
+assert(
+    'Legacy span maps to the correct messages',
+    getMessagesForStoredEpisode(normalized, legacyEpisode).map(message => message.id).join(',') === '102,103',
+);
+assert('Canonical and legacy turn keys differ when IDs differ from indices', buildTurnKey(normalized[3]) !== buildLegacyTurnKey(normalized[3]));
 
-// --- Test 3: Episode creation ---
+console.log('\n=== Test 3: Consolidation Cluster Regression ===\n');
 
-console.log('\n=== Test 3: Episode Creation ===');
+const bridgeEpisodes = [
+    createEpisode({ id: 'a', participants: ['p1'] }),
+    createEpisode({ id: 'b', participants: ['p1', 'p2'] }),
+    createEpisode({ id: 'c', participants: ['p2'] }),
+    createEpisode({ id: 'd', participants: ['p2'] }),
+    createEpisode({ id: 'e', participants: ['p2'] }),
+];
+const bridgeClusters = clusterEpisodesAtDepth(bridgeEpisodes, 0, { fanout: 4, jaccardThreshold: 0.5 });
 
-for (const ep of EPISODE_EXPECTATIONS) {
-    const messages = msgsUpTo(ep.triggerAfterMessageId);
-    const chatState = {
-        sceneCard: createSceneCard(),
-        episodes: [],
-        lastEpisodeBoundaryMessageId: -1,
-    };
-    const candidate = await buildEpisodeCandidate({
-        chatState,
-        recentMessages: messages,
-        settings: { sceneMessageThreshold: ep.threshold },
-        force: ep.force || false,
-    });
+assert('Bridge cluster is no longer lost', bridgeClusters.length >= 1, `got ${bridgeClusters.length}`);
+assert(
+    'Bridge cluster still contains the valid connected set',
+    bridgeClusters.some(cluster => ['b', 'c', 'd', 'e'].every(id => cluster.some(episode => episode.id === id))),
+);
 
-    assert('episodes', `${ep.label} — created`, ep.expect.created ? candidate !== null : candidate === null,
-        candidate ? `title="${candidate.title}"` : 'null');
+console.log('\n=== Test 4: Archived Pruning ===\n');
 
-    if (candidate && ep.expect.minSignificance) {
-        assert('episodes', `${ep.label} — significance >= ${ep.expect.minSignificance}`,
-            candidate.significance >= ep.expect.minSignificance,
-            `got ${candidate.significance}`);
-    }
-}
+const archivedEpisodes = [
+    createEpisode({ id: 'old_a', archived: true, createdAtTs: 1 }),
+    createEpisode({ id: 'old_b', archived: true, createdAtTs: 2 }),
+    createEpisode({ id: 'old_c', archived: true, createdAtTs: 3 }),
+    createEpisode({ id: 'semantic', archived: false, sourceEpisodeIds: ['old_c'] }),
+];
+const pruned = pruneArchivedEpisodes(archivedEpisodes, 2);
+assert('Archived pruning removes oldest unprotected episode', !pruned.some(episode => episode.id === 'old_a'));
+assert('Archived pruning keeps lineage-protected episode', pruned.some(episode => episode.id === 'old_c'));
 
-// --- Test 4: Retrieval ranking ---
+console.log('\n=== Test 5: Retrieval Preparation ===\n');
 
-console.log('\n=== Test 4: Retrieval Ranking ===');
-
-// Build episodes from different scenes
 const tavernEpisode = createEpisode({
-    id: 'ep_tavern', messageStart: 0, messageEnd: 9,
-    title: 'Scene at The Rusty Anchor', summary: 'Arrived at The Rusty Anchor tavern. Met Elena who told us about the missing map.',
-    participants: ['User', 'Elena'], locations: ['The Rusty Anchor'],
-    tags: ['location', 'goal'], significance: 2,
-});
-const cellarEpisode = createEpisode({
-    id: 'ep_cellar', messageStart: 10, messageEnd: 19,
-    title: 'Scene in the cellar', summary: 'Descended to the cellar. Fought giant rats. Discovered hidden door with ancient runes.',
-    participants: ['User', 'Elena'], locations: ['the cellar'],
-    tags: ['conflict', 'location', 'mystery'], significance: 3,
+    id: 'ep_tavern',
+    messageStart: 100,
+    messageEnd: 101,
+    title: 'Tavern warning',
+    summary: 'Met Elena in the tavern and heard about the missing map.',
+    participants: ['User', 'Elena'],
+    locations: ['tavern'],
+    significance: 2,
 });
 const betrayalEpisode = createEpisode({
-    id: 'ep_betrayal', messageStart: 20, messageEnd: 29,
-    title: 'Betrayal in the tunnels', summary: 'Elena betrayed us in the underground tunnels. She attacked with a hidden dagger. Mentioned "The Order".',
-    participants: ['User', 'Elena'], locations: ['underground tunnels'],
-    tags: ['relationship', 'conflict'], significance: 5,
+    id: 'ep_betrayal',
+    messageStart: 2,
+    messageEnd: 3,
+    title: 'Elena betrayal',
+    summary: 'Elena betrayed the user with a dagger and named The Order.',
+    participants: ['User', 'Elena'],
+    locations: ['cellar'],
+    significance: 5,
 });
 
-const allEpisodes = [tavernEpisode, cellarEpisode, betrayalEpisode];
+const llmStub = async ({ prompt }) => {
+    if (prompt.includes('Return JSON array')) {
+        return { text: '[{"n": 1, "s": 10}]', error: null };
+    }
+    if (prompt.includes('How relevant is this conversation')) {
+        if (prompt.includes('betrayed the user with a dagger')) {
+            return { text: '{"s": 10, "reason": "dagger betrayal"}', error: null };
+        }
+        return { text: '{"s": 2, "reason": "weak match"}', error: null };
+    }
+    return { text: '[]', error: null };
+};
 
-for (const rq of RETRIEVAL_QUERIES) {
-    const queryContext = buildQueryContext({
-        recentMessages: [{ text: rq.queryText }],
-        sceneCard: null,
-    });
-    const scored = scoreEpisodes(allEpisodes, queryContext);
-    const top = scored[0];
+const prepared = await prepareGenerationMemoryData({
+    chatState: {
+        sceneCard: {
+            location: 'cellar',
+            timeContext: '',
+            activeGoal: 'stop The Order',
+            activeConflict: 'Elena betrayed the user',
+            participants: ['User', 'Elena'],
+            openThreads: ['Who sent Elena'],
+        },
+        episodes: [tavernEpisode, betrayalEpisode],
+    },
+    recentMessages: [{ text: 'Elena betrayed me with a dagger. The Order is behind this.' }],
+    allMessages: normalized,
+    settings: { maxEpisodesInjected: 2, retrievalCandidateCount: 4, retrievalChunkSize: 4, memoryFormat: 'text' },
+    llmCallFn: llmStub,
+});
 
-    assert('retrieval', `${rq.label} — top result`,
-        top && (top.item.title + ' ' + top.item.summary).toLowerCase().includes(rq.expectedTopContains.toLowerCase()),
-        `top="${top?.item?.title}", want contains "${rq.expectedTopContains}"`);
-}
+assert('Retrieval preparation returns a non-empty memory block', prepared.memoryBlock.length > 0);
+assert('Retrieval preparation selects betrayal episode first', prepared.selected.episodes[0]?.id === 'ep_betrayal');
 
-// --- Test 5: End-to-end pipeline ---
+console.log('\n=== Test 6: User-Facing Copy Cleanup ===\n');
 
-console.log('\n=== Test 5: End-to-End Pipeline ===');
+const bannedPatterns = [
+    /\bfree mode\b/i,
+    /\bfree tier\b/i,
+    /\bheuristic mode\b/i,
+];
+const copyFiles = [
+    join(repoRoot, 'README.md'),
+    join(repoRoot, 'settings.html'),
+    join(repoRoot, 'docs', 'BUILD_PLAN.md'),
+];
 
-// Build state incrementally
-let sceneCard = createSceneCard();
-const episodes = [];
-let lastBoundary = -1;
-
-for (let i = 0; i < CHAT_MESSAGES.length; i += 10) {
-    const batch = CHAT_MESSAGES.slice(0, i + 10);
-    const stateUpdate = extractStateUpdates({ recentMessages: batch });
-    sceneCard = mergeSceneCard(sceneCard, stateUpdate, { updatedAtMessageId: i + 9, updatedAtTs: Date.now() });
-
-    const candidate = await buildEpisodeCandidate({
-        chatState: { sceneCard, episodes, lastEpisodeBoundaryMessageId: lastBoundary },
-        recentMessages: batch,
-        settings: { sceneMessageThreshold: 10 },
-    });
-    if (candidate) {
-        episodes.push(candidate);
-        lastBoundary = candidate.messageEnd;
+for (const filePath of copyFiles) {
+    const content = readFileSync(filePath, 'utf-8');
+    for (const pattern of bannedPatterns) {
+        assert(
+            `${filePath.replace(repoRoot + '/', '')} excludes ${pattern}`,
+            !pattern.test(content),
+        );
     }
 }
-
-assert('e2e', 'Episodes created during simulation', episodes.length >= 1,
-    `got ${episodes.length} episodes`);
-
-// Run retrieval at the end
-const finalMessages = CHAT_MESSAGES.slice(-3);
-const queryContext = buildQueryContext({ recentMessages: finalMessages, sceneCard });
-const scoredScene = scoreSceneCard(sceneCard, queryContext);
-const scoredEps = scoreEpisodes(episodes, queryContext);
-const selected = selectMemoryItems({ scoredSceneCard: scoredScene, scoredEpisodes: scoredEps, settings: { maxEpisodesInjected: 3 } });
-const memoryBlock = formatMemoryBlock({ sceneCard: selected.sceneCard, episodes: selected.episodes, maxChars: 4000 });
-
-assert('e2e', 'Memory block is non-empty', memoryBlock.length > 0);
-assert('e2e', 'Memory block under 4000 chars', memoryBlock.length <= 4000,
-    `got ${memoryBlock.length} chars`);
-assert('e2e', 'Memory block contains current location',
-    memoryBlock.toLowerCase().includes('forest') || memoryBlock.toLowerCase().includes('citadel'),
-    `block does not reference current scene`);
-
-// --- Test 6: XML format ---
-
-console.log('\n=== Test 6: XML Format ===');
-
-const xmlBlock = formatMemoryBlock({ sceneCard: selected.sceneCard, episodes: selected.episodes, maxChars: 4000, format: 'xml' });
-assert('xml', 'XML block is non-empty', xmlBlock.length > 0);
-assert('xml', 'XML block starts with <anchor_memory>', xmlBlock.startsWith('<anchor_memory>'));
-assert('xml', 'XML block ends with </anchor_memory>', xmlBlock.trimEnd().endsWith('</anchor_memory>'));
-assert('xml', 'XML block contains <scene>', xmlBlock.includes('<scene>'));
-assert('xml', 'XML block under 4000 chars', xmlBlock.length <= 4000, `got ${xmlBlock.length} chars`);
-assert('xml', 'XML block contains location', xmlBlock.toLowerCase().includes('forest') || xmlBlock.toLowerCase().includes('citadel'));
-
-// Empty input returns empty for both formats
-const emptyText = formatMemoryBlock({ sceneCard: null, episodes: [], format: 'text' });
-const emptyXml = formatMemoryBlock({ sceneCard: null, episodes: [], format: 'xml' });
-assert('xml', 'Empty text returns empty string', emptyText === '');
-assert('xml', 'Empty xml returns empty string', emptyXml === '');
-
-// --- Results ---
 
 console.log('\n' + '='.repeat(50));
 console.log(`Results: ${totalPassed} passed, ${totalFailed} failed`);
 
 if (failures.length > 0) {
     console.log('\nFailures:');
-    for (const f of failures) console.log(`  - ${f}`);
+    for (const failure of failures) console.log(`  - ${failure}`);
 }
 
 const verdict = totalFailed === 0 ? 'PASS' : 'FAIL';

@@ -16,14 +16,7 @@ export async function callMemoryLLM({
     try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-        let text = null;
-        try {
-            text = await tryServiceCall({ prompt, systemPrompt, maxTokens, modelSource, modelId, signal: controller.signal });
-        } catch (serviceError) {
-            console.warn('[AnchorMemory] Service call failed, trying quiet prompt:', serviceError?.message);
-            text = await tryQuietCall({ prompt, maxTokens });
-        }
+        const text = await tryServiceCall({ prompt, systemPrompt, maxTokens, modelSource, modelId, signal: controller.signal });
 
         clearTimeout(timer);
         return { text, error: null };
@@ -64,23 +57,11 @@ async function tryServiceCall({ prompt, systemPrompt, maxTokens, modelSource, mo
     throw new Error('Unexpected response shape');
 }
 
-async function tryQuietCall({ prompt, maxTokens }) {
-    const context = getContext();
-    const generate = context?.generateQuietPrompt;
-    if (typeof generate !== 'function') {
-        throw new Error('No LLM API available');
-    }
-
-    console.info('[AnchorMemory] Using generateQuietPrompt fallback (no model override)');
-    const result = await generate(prompt, false, false, null, null, maxTokens);
-    return result || null;
-}
-
 export function createLLMCaller(settings, extraDefaults = {}) {
     return (args) => callMemoryLLM({ ...extraDefaults, ...args, settings });
 }
 
 export function isLLMAvailable() {
     const context = getContext();
-    return Boolean(context?.ChatCompletionService?.processRequest || context?.generateQuietPrompt);
+    return Boolean(context?.ChatCompletionService?.processRequest);
 }

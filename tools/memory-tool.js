@@ -1,5 +1,6 @@
 import { getContext } from '../../../../st-context.js';
 import { getSettings } from '../core/settings.js';
+import { getMemoryInactiveReason, isMemoryConfigured } from '../core/memory-config.js';
 import { getChatState, getActiveChatId } from '../core/storage.js';
 import { buildQueryContext } from '../retrieval/query-builder.js';
 import { scoreEpisodes } from '../retrieval/score-episodes.js';
@@ -55,6 +56,9 @@ export function unregisterMemoryTool() {
 
 async function handleRecallMemory({ query }) {
     const settings = getSettings();
+    if (!isMemoryConfigured(settings)) {
+        return getMemoryInactiveReason(settings);
+    }
     const chatState = getChatState(getActiveChatId());
 
     const queryContext = buildQueryContext({

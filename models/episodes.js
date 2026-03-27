@@ -119,3 +119,28 @@ export function hasEpisodeSpan(episodes, messageStart, messageEnd) {
             && Number(episode?.messageEnd) === Number(messageEnd),
     );
 }
+
+export function pruneArchivedEpisodes(episodes, maxArchived) {
+    const archived = [];
+    const protectedIds = new Set();
+    for (const ep of episodes) {
+        if (ep.archived) {
+            archived.push(ep);
+        } else if (ep.sourceEpisodeIds) {
+            for (const id of ep.sourceEpisodeIds) protectedIds.add(id);
+        }
+    }
+    if (archived.length <= maxArchived) return episodes;
+
+    archived.sort((a, b) => a.createdAtTs - b.createdAtTs);
+    const toRemove = new Set();
+    const target = archived.length - maxArchived;
+
+    for (const ep of archived) {
+        if (toRemove.size >= target) break;
+        if (protectedIds.has(ep.id)) continue;
+        toRemove.add(ep.id);
+    }
+
+    return toRemove.size > 0 ? episodes.filter(ep => !toRemove.has(ep.id)) : episodes;
+}

@@ -9,16 +9,8 @@ const DEFAULT_SETTINGS = {
     preserveRecentMessages: 12,
     maxEpisodesInjected: 3,
     maxInjectedChars: 4000,
-    autoCreateEpisodes: true,
-    sceneMessageThreshold: 14,
     promptPosition: 'in_chat',
     promptDepth: 1,
-    promptRole: 'system',
-
-    // Windowed extraction
-    windowedExtraction: true,
-    extractionWindowSize: 8,
-    extractionWindowOverlap: 3,
 
     // LLM infrastructure
     memoryModelSource: '',
@@ -29,17 +21,10 @@ const DEFAULT_SETTINGS = {
     consolidationThreshold: 60,
     autoConsolidation: true,
 
-    // LLM re-ranking
-    llmReranking: false,
-    rerankCandidateCount: 8,
-    rerankTimeoutMs: 5000,
-
-    // LLM episode summarization
-    llmSummarization: false,
-
-    // RLM retrieval
-    llmRetrieval: true,
+    // Retrieval
+    retrievalCandidateCount: 8,
     retrievalChunkSize: 10,
+    rerankTimeoutMs: 5000,
 
     // Memory format
     memoryFormat: 'text',
@@ -59,6 +44,19 @@ const DEFAULT_SETTINGS = {
     storageMaxArchived: 200,
 };
 
+const DEPRECATED_SETTINGS = [
+    'autoCreateEpisodes',
+    'sceneMessageThreshold',
+    'promptRole',
+    'windowedExtraction',
+    'extractionWindowSize',
+    'extractionWindowOverlap',
+    'llmReranking',
+    'rerankCandidateCount',
+    'llmSummarization',
+    'llmRetrieval',
+];
+
 export function getDefaultSettings() {
     return structuredClone(DEFAULT_SETTINGS);
 }
@@ -70,6 +68,9 @@ function ensureDefaults() {
         if (settings[key] === undefined || settings[key] === null) {
             settings[key] = structuredClone(value);
         }
+    }
+    for (const key of DEPRECATED_SETTINGS) {
+        delete settings[key];
     }
 }
 

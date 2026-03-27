@@ -1,12 +1,18 @@
 import { getContext } from '../../../../st-context.js';
 import { getSettings } from '../core/settings.js';
 import { getActiveChatId, getChatState, saveChatState } from '../core/storage.js';
-import { createEpisode, hasEpisodeSpan, capActiveEpisodes } from '../models/episodes.js';
+import { isMemoryConfigured } from '../core/memory-config.js';
+import {
+    normalizeChatMessages,
+    getLatestAssistantMessage,
+    buildTurnKey,
+    buildLegacyTurnKey,
+    resolveStoredMessageId,
+    resolveStoredSpan,
+} from '../core/messages.js';
+import { createEpisode, hasEpisodeSpan, capActiveEpisodes, pruneArchivedEpisodes } from '../models/episodes.js';
 import { hasSceneCardContent, mergeSceneCard } from '../models/state-cards.js';
-import { extractStateUpdates } from '../writing/extract-state.js';
-import { extractStateWindowed } from '../writing/windowed-extractor.js';
 import { llmExtractScene } from '../writing/llm-extract-state.js';
-import { buildEpisodeCandidate } from '../writing/build-episode.js';
 import { buildLLMEpisodeSummary } from '../writing/llm-summarizer.js';
 import { consolidateEpisodes, applyConsolidation } from '../writing/consolidate-episodes.js';
 import { createLLMCaller } from '../llm/api.js';
@@ -19,7 +25,7 @@ export async function processCompletedTurn({
     type = 'normal',
 } = {}) {
     const resolvedSettings = Object.keys(settings).length > 0 ? settings : getSettings();
-    if (!resolvedSettings.enabled || type !== 'normal') {
+    if (!resolvedSettings.enabled || type !== 'normal' || !isMemoryConfigured(resolvedSettings)) {
         return {
             episodeCandidate: null,
             safeUpdates: [],
@@ -31,14 +37,8 @@ export async function processCompletedTurn({
     const resolvedChatState = chatState || getChatState(chatId);
     const normalizedMessages = recentMessages.length > 0
         ? recentMessages
-        : context.chat.map((message, index) => ({
-            id: index,
-            isUser: Boolean(message.is_user),
-            isSystem: Boolean(message.is_system),
-            name: String(message.name || (message.is_user ? context.name1 : context.name2) || ''),
-            text: String(message.mes || ''),
-        })).filter(message => !message.isSystem);
-    const finalAssistantMessage = latestAssistantMessage || findLatestAssistantMessage(normalizedMessages);
+        : normalizeChatMessages(context.chat, context);
+    const finalAssistantMessage = latestAssistantMessage || getLatestAssistantMessage(normalizedMessages);
 
     if (!finalAssistantMessage) {
         return {
@@ -47,38 +47,64 @@ export async function processCompletedTurn({
         };
     }
 
-    const turnKey = `${finalAssistantMessage.id}:${hashText(finalAssistantMessage.text)}:normal`;
-    if (resolvedChatState.lastProcessedTurnKey === turnKey) {
+    const canonicalChatState = canonicalizeChatStateForMessages(resolvedChatState, normalizedMessages);
+    const turnKey = buildTurnKey(finalAssistantMessage);
+    const legacyTurnKey = buildLegacyTurnKey(finalAssistantMessage);
+    if (canonicalChatState.lastProcessedTurnKey === turnKey || canonicalChatState.lastProcessedTurnKey === legacyTurnKey) {
         return {
             episodeCandidate: null,
             safeUpdates: [],
         };
     }
 
-    const useLLMExtraction = Boolean(resolvedSettings.memoryModelSource && resolvedSettings.memoryModel);
-    const sceneUpdate = await extractSceneState(useLLMExtraction, normalizedMessages, resolvedChatState, resolvedSettings, finalAssistantMessage);
+    const llmCallFn = createLLMCaller(resolvedSettings);
+    const sceneUpdate = await llmExtractScene({
+        recentMessages: normalizedMessages,
+        chatState: canonicalChatState,
+        llmCallFn,
+    });
+    if (!sceneUpdate) {
+        console.warn('[AnchorMemory] Scene extraction failed; skipping memory write for this turn');
+        return {
+            episodeCandidate: null,
+            safeUpdates: [],
+        };
+    }
+
     const nextSceneCard = mergeSceneCard(
-        resolvedChatState.sceneCard,
+        canonicalChatState.sceneCard,
         sceneUpdate,
         {
             updatedAtMessageId: finalAssistantMessage.id,
             updatedAtTs: Date.now(),
-            replaceThreads: useLLMExtraction,
+            replaceThreads: true,
         },
     );
 
-    const episodeCandidate = await buildEpisode(
-        useLLMExtraction, sceneUpdate, normalizedMessages, resolvedChatState, nextSceneCard, resolvedSettings,
-    );
+    const episodeResult = await buildEpisode({
+        sceneUpdate,
+        messages: normalizedMessages,
+        chatState: canonicalChatState,
+        sceneCard: nextSceneCard,
+        llmCallFn,
+    });
+    if (!episodeResult.ok) {
+        console.warn('[AnchorMemory] Episode summarization failed; skipping memory write for this turn');
+        return {
+            episodeCandidate: null,
+            safeUpdates: [],
+        };
+    }
+    const episodeCandidate = episodeResult.episodeCandidate;
 
     let nextState = {
-        ...resolvedChatState,
+        ...canonicalChatState,
         lastProcessedTurnKey: turnKey,
         sceneCard: nextSceneCard,
     };
 
-    if (episodeCandidate && !hasEpisodeSpan(resolvedChatState.episodes, episodeCandidate.messageStart, episodeCandidate.messageEnd)) {
-        nextState.episodes = capActiveEpisodes([...(resolvedChatState.episodes || []), episodeCandidate]);
+    if (episodeCandidate && !hasEpisodeSpan(canonicalChatState.episodes, episodeCandidate.messageStart, episodeCandidate.messageEnd)) {
+        nextState.episodes = capActiveEpisodes([...(canonicalChatState.episodes || []), episodeCandidate]);
         nextState.lastEpisodeBoundaryMessageId = episodeCandidate.messageEnd;
 
         const activeCount = nextState.episodes.filter(ep => !ep.archived).length;
@@ -103,7 +129,7 @@ export async function processCompletedTurn({
 
                 // Prune archived episodes beyond storageMaxArchived
                 const maxArchived = Number(resolvedSettings.storageMaxArchived) || 200;
-                nextState.episodes = pruneArchived(nextState.episodes, maxArchived);
+                nextState.episodes = pruneArchivedEpisodes(nextState.episodes, maxArchived);
             } else {
                 nextState.pendingConsolidation = false;
             }
@@ -124,108 +150,63 @@ export async function processCompletedTurn({
 /**
  * Prune archived episodes beyond maxArchived, protecting those referenced by active sourceEpisodeIds.
  */
-export function pruneArchived(episodes, maxArchived) {
-    // Single pass: split + collect protected IDs
-    const archived = [];
-    const protectedIds = new Set();
-    for (const ep of episodes) {
-        if (ep.archived) {
-            archived.push(ep);
-        } else if (ep.sourceEpisodeIds) {
-            for (const id of ep.sourceEpisodeIds) protectedIds.add(id);
-        }
-    }
-    if (archived.length <= maxArchived) return episodes;
-
-    // Sort archived oldest first for pruning
-    archived.sort((a, b) => a.createdAtTs - b.createdAtTs);
-    const toRemove = new Set();
-    const target = archived.length - maxArchived;
-    let protectedCount = 0;
-
-    for (const ep of archived) {
-        if (toRemove.size >= target) break;
-        if (protectedIds.has(ep.id)) {
-            protectedCount++;
-            continue;
-        }
-        toRemove.add(ep.id);
-    }
-
-    if (protectedCount > 0 && toRemove.size < target) {
-        console.warn(`[AnchorMemory] Archived pruning: ${protectedCount} episodes protected by lineage, ${toRemove.size} pruned`);
-    }
-
-    return toRemove.size > 0 ? episodes.filter(ep => !toRemove.has(ep.id)) : episodes;
-}
-
-async function buildEpisode(useLLM, sceneUpdate, messages, chatState, sceneCard, settings) {
+async function buildEpisode({
+    sceneUpdate,
+    messages,
+    chatState,
+    sceneCard,
+    llmCallFn,
+}) {
     const lastBoundary = Number(chatState.lastEpisodeBoundaryMessageId ?? -1);
     const candidates = messages.filter(m => Number(m.id) > lastBoundary);
-
-    if (useLLM) {
-        let boundary = sceneUpdate?.boundary || null;
-        if (candidates.length >= 25) {
-            boundary = { shouldCreate: true, reason: 'forced', significance: 2, title: '' };
-        }
-        if (boundary?.shouldCreate && candidates.length > 0) {
-            const llmCallFn = createLLMCaller(settings);
-            const episodeSummary = await buildLLMEpisodeSummary(candidates, sceneCard, llmCallFn);
-            if (episodeSummary) {
-                return createEpisode({
-                    messageStart: Number(candidates[0].id),
-                    messageEnd: Number(candidates[candidates.length - 1].id),
-                    participants: sceneCard.participants || [],
-                    locations: sceneCard.location ? [sceneCard.location] : [],
-                    ...episodeSummary,
-                });
-            }
-            // LLM summary failed, fall through to heuristic
-        }
-        if (!boundary?.shouldCreate) return null;
+    let boundary = sceneUpdate?.boundary || null;
+    if (candidates.length >= 25) {
+        boundary = { shouldCreate: true, reason: 'forced', significance: 2, title: '' };
+    }
+    if (!boundary?.shouldCreate || candidates.length === 0) {
+        return { ok: true, episodeCandidate: null };
     }
 
-    // Heuristic path
-    return buildEpisodeCandidate({
-        chatState: { ...chatState, sceneCard },
-        recentMessages: messages,
-        settings,
-        llmCallFn: settings.llmSummarization ? createLLMCaller(settings) : null,
+    const episodeSummary = await buildLLMEpisodeSummary(candidates, sceneCard, llmCallFn);
+    if (!episodeSummary) {
+        return { ok: false, episodeCandidate: null };
+    }
+
+    return {
+        ok: true,
+        episodeCandidate: createEpisode({
+            messageStart: Number(candidates[0].id),
+            messageEnd: Number(candidates[candidates.length - 1].id),
+            participants: sceneCard.participants || [],
+            locations: sceneCard.location ? [sceneCard.location] : [],
+            ...episodeSummary,
+        }),
+    };
+}
+
+function canonicalizeChatStateForMessages(chatState, messages) {
+    const lastEpisodeBoundaryMessageId = resolveStoredMessageId(chatState.lastEpisodeBoundaryMessageId, messages)
+        ?? chatState.lastEpisodeBoundaryMessageId;
+    const updatedAtMessageId = resolveStoredMessageId(chatState.sceneCard?.updatedAtMessageId, messages)
+        ?? chatState.sceneCard?.updatedAtMessageId
+        ?? 0;
+    const episodes = (chatState.episodes || []).map(episode => {
+        const span = resolveStoredSpan(episode, messages);
+        if (!span) return episode;
+        return {
+            ...episode,
+            messageStart: span.start,
+            messageEnd: span.end,
+        };
     });
-}
 
-async function extractSceneState(useLLM, messages, chatState, settings, latestAssistantMessage) {
-    if (useLLM) {
-        const result = await llmExtractScene({ recentMessages: messages, chatState, llmCallFn: createLLMCaller(settings) });
-        if (result) return result;
-        console.warn('[AnchorMemory] LLM extraction failed, falling back to heuristic');
-    }
-    if (settings.windowedExtraction) {
-        return extractStateWindowed({
-            recentMessages: messages,
-            chatState,
-            windowSize: Number(settings.extractionWindowSize) || 8,
-            overlap: Number(settings.extractionWindowOverlap) || 3,
-        });
-    }
-    return extractStateUpdates({ chatState, recentMessages: messages, latestAssistantMessage });
-}
-
-function findLatestAssistantMessage(messages) {
-    for (let index = messages.length - 1; index >= 0; index--) {
-        if (!messages[index].isUser) {
-            return messages[index];
-        }
-    }
-    return null;
-}
-
-export function hashText(text) {
-    let hash = 0;
-    const value = String(text || '');
-    for (let index = 0; index < value.length; index++) {
-        hash = ((hash << 5) - hash) + value.charCodeAt(index);
-        hash |= 0;
-    }
-    return Math.abs(hash).toString(36);
+    return {
+        ...chatState,
+        lastEpisodeBoundaryMessageId,
+        sceneCard: {
+            ...(chatState.sceneCard || {}),
+            updatedAtMessageId,
+        },
+        episodes,
+    };
 }

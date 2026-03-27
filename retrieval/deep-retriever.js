@@ -1,6 +1,8 @@
 const BATCH_CONCURRENCY = 3;
 const MAX_RAW_CHARS = 2500;
 
+import { getMessagesForStoredEpisode } from '../core/messages.js';
+
 export async function deepRetrieve({
     candidates = [],
     queryContext = {},
@@ -38,9 +40,7 @@ export async function deepRetrieve({
 async function scoreCandidate(candidate, sceneContext, allMessages, llmCallFn) {
     try {
         const ep = candidate.item;
-        const rawMessages = allMessages.filter(
-            m => m.id >= ep.messageStart && m.id <= ep.messageEnd,
-        );
+        const rawMessages = getMessagesForStoredEpisode(allMessages, ep);
 
         const conversationText = formatMessages(rawMessages, MAX_RAW_CHARS);
         if (!conversationText) {

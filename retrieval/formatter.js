@@ -45,8 +45,8 @@ function formatText({ sceneCard, episodes, maxChars }) {
 
 function formatEpisodeText(episode, index) {
     const tags = episode.tags?.length ? ` [${episode.tags.slice(0, 3).join(', ')}]` : '';
-    const facts = episode.keyFacts?.length ? `\nKey: ${truncate(episode.keyFacts.join('; '), 100)}` : '';
-    return `${index + 1}. ${truncate(episode.title, 100)}${tags}\n${truncate(episode.summary, 320)}${facts}`;
+    const facts = episode.keyFacts?.length ? `\nKey: ${truncate(episode.keyFacts.join('; '), 250)}` : '';
+    return `${index + 1}. ${truncate(episode.title, 100)}${tags}\n${truncate(episode.summary, 500)}${facts}`;
 }
 
 // --- XML format ---
@@ -89,7 +89,7 @@ function buildSceneXml(sceneCard) {
     if (sceneCard.activeGoal) lines.push(`<goal>${escXml(truncate(sceneCard.activeGoal, 160))}</goal>`);
     if (sceneCard.activeConflict) lines.push(`<conflict>${escXml(truncate(sceneCard.activeConflict, 160))}</conflict>`);
     if (sceneCard.participants?.length) lines.push(`<participants>${escXml(sceneCard.participants.join(', '))}</participants>`);
-    if (sceneCard.openThreads?.length) lines.push(`<open_threads>${escXml(sceneCard.openThreads.map(t => truncate(t, 80)).join(' | '))}</open_threads>`);
+    if (sceneCard.openThreads?.length) lines.push(`<open_threads>${escXml(sceneCard.openThreads.map(t => truncate(t, 120)).join(' | '))}</open_threads>`);
     return lines.join('\n');
 }
 
@@ -97,8 +97,8 @@ function formatEpisodeXml(episode) {
     const sig = episode.significance != null ? ` significance="${episode.significance}"` : '';
     const tags = episode.tags?.length ? ` tags="${escXml(episode.tags.slice(0, 3).join(', '))}"` : '';
     const title = `<title>${escXml(truncate(episode.title, 100))}</title>`;
-    const summary = `<summary>${escXml(truncate(episode.summary, 320))}</summary>`;
-    const facts = episode.keyFacts?.length ? `\n<key_facts>${escXml(truncate(episode.keyFacts.join('; '), 100))}</key_facts>` : '';
+    const summary = `<summary>${escXml(truncate(episode.summary, 500))}</summary>`;
+    const facts = episode.keyFacts?.length ? `\n<key_facts>${escXml(truncate(episode.keyFacts.join('; '), 250))}</key_facts>` : '';
     return `<event${sig}${tags}>\n${title}\n${summary}${facts}\n</event>`;
 }
 
@@ -111,7 +111,7 @@ function buildSceneLines(sceneCard) {
     if (sceneCard?.activeGoal) lines.push(`- Goal: ${truncate(sceneCard.activeGoal, 160)}`);
     if (sceneCard?.activeConflict) lines.push(`- Conflict: ${truncate(sceneCard.activeConflict, 160)}`);
     if (sceneCard?.participants?.length) lines.push(`- Participants: ${sceneCard.participants.join(', ')}`);
-    if (sceneCard?.openThreads?.length) lines.push(`- Open Threads: ${sceneCard.openThreads.map(t => truncate(t, 80)).join(' | ')}`);
+    if (sceneCard?.openThreads?.length) lines.push(`- Open Threads: ${sceneCard.openThreads.map(t => truncate(t, 120)).join(' | ')}`);
     return lines;
 }
 

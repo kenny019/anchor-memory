@@ -63,7 +63,6 @@ function bindUi() {
     $('#am_enabled').prop('checked', settings.enabled);
     $('#am_preserve_recent_messages').val(settings.preserveRecentMessages);
     $('#am_max_episodes').val(settings.maxEpisodesInjected);
-    $('#am_scene_threshold').val(settings.sceneMessageThreshold);
     $('#am_prompt_position').val(settings.promptPosition);
     $('#am_prompt_depth').val(settings.promptDepth);
     $('#am_memory_format').val(settings.memoryFormat);
@@ -84,10 +83,6 @@ function bindUi() {
         updateSettings({ maxEpisodesInjected: toPositiveInt($(this).val(), 3) });
     });
 
-    $('#am_scene_threshold').off('input').on('input', function () {
-        updateSettings({ sceneMessageThreshold: toPositiveInt($(this).val(), 14) });
-    });
-
     $('#am_prompt_position').off('change').on('change', function () {
         updateSettings({ promptPosition: String($(this).val() || 'in_chat') });
     });
@@ -99,29 +94,14 @@ function bindUi() {
         updateSettings({ memoryFormat: String($(this).val() || 'text') });
     });
 
-    // Windowed extraction
-    $('#am_windowed_extraction').prop('checked', settings.windowedExtraction);
-    $('#am_extraction_window_size').val(settings.extractionWindowSize);
-    $('#am_extraction_window_overlap').val(settings.extractionWindowOverlap);
-
-    $('#am_windowed_extraction').off('change').on('change', function () {
-        updateSettings({ windowedExtraction: $(this).prop('checked') });
-    });
-    $('#am_extraction_window_size').off('input').on('input', function () {
-        updateSettings({ extractionWindowSize: toPositiveInt($(this).val(), 8) });
-    });
-    $('#am_extraction_window_overlap').off('input').on('input', function () {
-        updateSettings({ extractionWindowOverlap: toPositiveInt($(this).val(), 3) });
-    });
-
     // LLM settings
     $('#am_memory_model_source').val(settings.memoryModelSource);
     $('#am_memory_model').val(settings.memoryModel);
     $('#am_llm_consolidation').prop('checked', settings.llmConsolidation);
     $('#am_auto_consolidation').prop('checked', settings.autoConsolidation);
     $('#am_consolidation_threshold').val(settings.consolidationThreshold);
-    $('#am_llm_reranking').prop('checked', settings.llmReranking);
-    $('#am_rerank_candidate_count').val(settings.rerankCandidateCount);
+    $('#am_retrieval_candidate_count').val(settings.retrievalCandidateCount);
+    $('#am_retrieval_chunk_size').val(settings.retrievalChunkSize);
     $('#am_memory_tool_enabled').prop('checked', settings.memoryToolEnabled);
 
     $('#am_memory_model_source').off('input').on('input', function () {
@@ -129,11 +109,6 @@ function bindUi() {
     });
     $('#am_memory_model').off('input').on('input', function () {
         updateSettings({ memoryModel: String($(this).val() || '') });
-    });
-    // LLM summarization
-    $('#am_llm_summarization').prop('checked', settings.llmSummarization);
-    $('#am_llm_summarization').off('change').on('change', function () {
-        updateSettings({ llmSummarization: $(this).prop('checked') });
     });
 
     $('#am_llm_consolidation').off('change').on('change', function () {
@@ -144,6 +119,12 @@ function bindUi() {
     });
     $('#am_consolidation_threshold').off('input').on('input', function () {
         updateSettings({ consolidationThreshold: toPositiveInt($(this).val(), 60) });
+    });
+    $('#am_retrieval_candidate_count').off('input').on('input', function () {
+        updateSettings({ retrievalCandidateCount: toPositiveInt($(this).val(), 8) });
+    });
+    $('#am_retrieval_chunk_size').off('input').on('input', function () {
+        updateSettings({ retrievalChunkSize: toPositiveInt($(this).val(), 10) });
     });
 
     // Hierarchical consolidation
@@ -169,23 +150,6 @@ function bindUi() {
     });
     $('#am_archived_max_results').off('input').on('input', function () {
         updateSettings({ archivedMaxResults: toPositiveInt($(this).val(), 2) });
-    });
-    // RLM retrieval
-    $('#am_llm_retrieval').prop('checked', settings.llmRetrieval);
-    $('#am_retrieval_chunk_size').val(settings.retrievalChunkSize);
-
-    $('#am_llm_retrieval').off('change').on('change', function () {
-        updateSettings({ llmRetrieval: $(this).prop('checked') });
-    });
-    $('#am_retrieval_chunk_size').off('input').on('input', function () {
-        updateSettings({ retrievalChunkSize: toPositiveInt($(this).val(), 10) });
-    });
-
-    $('#am_llm_reranking').off('change').on('change', function () {
-        updateSettings({ llmReranking: $(this).prop('checked') });
-    });
-    $('#am_rerank_candidate_count').off('input').on('input', function () {
-        updateSettings({ rerankCandidateCount: toPositiveInt($(this).val(), 8) });
     });
     $('#am_memory_tool_enabled').off('change').on('change', function () {
         const enabled = $(this).prop('checked');

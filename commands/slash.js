@@ -1,11 +1,12 @@
 import { getContext } from '../../../../st-context.js';
 import { clearExtensionPrompt, getSettings } from '../core/settings.js';
+import { getMemoryInactiveReason, isMemoryConfigured } from '../core/memory-config.js';
+import { normalizeChatMessages, getLatestAssistantMessage, buildTurnKey, resolveStoredMessageId, resolveStoredSpan } from '../core/messages.js';
 import { clearRetrievalSnapshot, getActiveChatId, getChatState, getRetrievalSnapshot, resetChatState, saveChatState } from '../core/storage.js';
-import { hashText } from '../runtime/postgen-hook.js';
 import { prepareGenerationMemory } from '../runtime/generation-hook.js';
-import { hasEpisodeSpan, episodeStats, formatDepthInfo, capActiveEpisodes } from '../models/episodes.js';
-import { buildEpisodeCandidate } from '../writing/build-episode.js';
+import { createEpisode, hasEpisodeSpan, episodeStats, formatDepthInfo, capActiveEpisodes, pruneArchivedEpisodes } from '../models/episodes.js';
 import { consolidateEpisodes, applyConsolidation } from '../writing/consolidate-episodes.js';
+import { buildLLMEpisodeSummary } from '../writing/llm-summarizer.js';
 import { createLLMCaller } from '../llm/api.js';
 
 let registered = false;
@@ -87,6 +88,7 @@ export function registerSlashCommands() {
 }
 
 function formatStatus() {
+    const settings = getSettings();
     const chatState = getChatState(getActiveChatId());
     const sceneLines = [];
     if (chatState.sceneCard.location) sceneLines.push(`location=${chatState.sceneCard.location}`);
@@ -100,31 +102,35 @@ function formatStatus() {
     return [
         'Anchor Memory Status',
         `chatId: ${chatState.chatId}`,
+        `configured: ${isMemoryConfigured(settings) ? 'yes' : 'no'}`,
+        !isMemoryConfigured(settings) ? `inactive: ${getMemoryInactiveReason(settings)}` : null,
         `sceneCard: ${sceneLines.length > 0 ? sceneLines.join(' | ') : '(empty)'}`,
         `episodes: ${stats.active} active (${depthInfo || '0'}), ${stats.archived} archived`,
         `lastProcessedTurnKey: ${chatState.lastProcessedTurnKey || '(none)'}`,
         `lastEpisodeBoundaryMessageId: ${chatState.lastEpisodeBoundaryMessageId ?? '(none)'}`,
-    ].join('\n');
+    ].filter(Boolean).join('\n');
 }
 
 async function previewRetrieval() {
     const context = getContext();
     const settings = getSettings();
+    if (!isMemoryConfigured(settings)) {
+        return getMemoryInactiveReason(settings);
+    }
     const chatState = getChatState(getActiveChatId());
-    const recentMessages = context.chat
-        .filter(message => message && !message.is_system)
-        .map((message, index) => ({
-            id: index,
-            isUser: Boolean(message.is_user),
-            name: String(message.name || (message.is_user ? context.name1 : context.name2) || ''),
-            text: String(message.mes || ''),
-        }))
-        .slice(-(Number(settings.preserveRecentMessages) || 12));
+    const allMessages = normalizeChatMessages(context.chat, context);
+    const recentMessages = allMessages.slice(-(Number(settings.preserveRecentMessages) || 12));
+    const configuredMax = Number(settings.maxInjectedChars) || 4000;
+    const effectiveSettings = {
+        ...settings,
+        maxInjectedChars: allMessages.length < 30 ? Math.min(configuredMax, 2000) : configuredMax,
+    };
 
     const prepared = await prepareGenerationMemory({
         chatState,
         recentMessages,
-        settings,
+        allMessages,
+        settings: effectiveSettings,
     });
 
     const episodeSummary = prepared.selected.episodes.length > 0
@@ -141,40 +147,47 @@ async function previewRetrieval() {
 }
 
 async function forceSceneBoundary(titleOverride = '') {
+    const settings = getSettings();
+    if (!isMemoryConfigured(settings)) {
+        return getMemoryInactiveReason(settings);
+    }
     const chatId = getActiveChatId();
     const chatState = getChatState(chatId);
     const context = getContext();
-    const recentMessages = context.chat
-        .filter(message => message && !message.is_system)
-        .map((message, index) => ({
-            id: index,
-            isUser: Boolean(message.is_user),
-            name: String(message.name || (message.is_user ? context.name1 : context.name2) || ''),
-            text: String(message.mes || ''),
-        }));
-
-    const candidate = await buildEpisodeCandidate({
-        chatState,
-        recentMessages,
-        settings: {
-            ...getSettings(),
-            sceneMessageThreshold: 1,
-        },
-        titleOverride,
-        force: true,
+    const recentMessages = normalizeChatMessages(context.chat, context);
+    const lastBoundary = resolveStoredMessageId(chatState.lastEpisodeBoundaryMessageId, recentMessages)
+        ?? Number(chatState.lastEpisodeBoundaryMessageId ?? -1);
+    const canonicalEpisodes = (chatState.episodes || []).map(episode => {
+        const span = resolveStoredSpan(episode, recentMessages);
+        return span ? { ...episode, messageStart: span.start, messageEnd: span.end } : episode;
     });
+    const candidates = recentMessages.filter(message => Number(message.id) > lastBoundary);
+    const summary = await buildLLMEpisodeSummary(candidates, chatState.sceneCard, createLLMCaller(settings));
+    const candidate = summary && candidates.length > 0
+        ? createEpisode({
+            messageStart: Number(candidates[0].id),
+            messageEnd: Number(candidates[candidates.length - 1].id),
+            participants: chatState.sceneCard?.participants || [],
+            locations: chatState.sceneCard?.location ? [chatState.sceneCard.location] : [],
+            title: titleOverride || summary.title,
+            summary: summary.summary,
+            tags: summary.tags,
+            significance: summary.significance,
+            keyFacts: summary.keyFacts,
+        })
+        : null;
 
     if (!candidate) {
-        return 'No scene content available to commit.';
+        return 'Unable to build a scene memory for the current chat state.';
     }
 
-    if (hasEpisodeSpan(chatState.episodes, candidate.messageStart, candidate.messageEnd)) {
+    if (hasEpisodeSpan(canonicalEpisodes, candidate.messageStart, candidate.messageEnd)) {
         return `Scene span ${candidate.messageStart}-${candidate.messageEnd} is already stored.`;
     }
 
     const nextState = {
         ...chatState,
-        episodes: capActiveEpisodes([...chatState.episodes, candidate]),
+        episodes: capActiveEpisodes([...canonicalEpisodes, candidate]),
         lastEpisodeBoundaryMessageId: candidate.messageEnd,
     };
     saveChatState(chatId, nextState);
@@ -184,12 +197,16 @@ async function forceSceneBoundary(titleOverride = '') {
 
 async function runConsolidate() {
     const settings = getSettings();
+    if (!isMemoryConfigured(settings)) {
+        return getMemoryInactiveReason(settings);
+    }
     const chatId = getActiveChatId();
     const chatState = getChatState(chatId);
     const activeEpisodes = (chatState.episodes || []).filter(ep => !ep.archived);
+    const minClusterSize = Number(settings.consolidationFanout) || 4;
 
-    if (activeEpisodes.length < 3) {
-        return 'Not enough episodes to consolidate (need at least 3).';
+    if (activeEpisodes.length < minClusterSize) {
+        return `Not enough episodes to consolidate (need at least ${minClusterSize}).`;
     }
 
     const maxDepth = Number(settings.maxConsolidationDepth) || 3;
@@ -200,6 +217,7 @@ async function runConsolidate() {
     }
 
     const nextState = applyConsolidation(chatState, result);
+    nextState.episodes = pruneArchivedEpisodes(nextState.episodes, Number(settings.storageMaxArchived) || 200);
     saveChatState(chatId, nextState);
 
     // Count distinct depths consolidated
@@ -210,20 +228,18 @@ async function runConsolidate() {
 function resetMemory() {
     const chatId = getActiveChatId();
     const context = getContext();
-    const messages = (context.chat || []).filter(m => m && !m.is_system);
+    const messages = normalizeChatMessages(context.chat || [], context);
 
     resetChatState(chatId);
 
     // Stamp current turn key + boundary so processCompletedTurn skips old messages
     if (messages.length > 0) {
         const chatState = getChatState(chatId);
-        const lastIdx = messages.length - 1;
-        const lastAssistant = [...messages].reverse().find(m => !m.is_user);
+        const lastAssistant = getLatestAssistantMessage(messages);
         if (lastAssistant) {
-            const assistantIdx = messages.indexOf(lastAssistant);
-            chatState.lastProcessedTurnKey = `${assistantIdx}:${hashText(String(lastAssistant.mes || ''))}:normal`;
+            chatState.lastProcessedTurnKey = buildTurnKey(lastAssistant);
         }
-        chatState.lastEpisodeBoundaryMessageId = lastIdx;
+        chatState.lastEpisodeBoundaryMessageId = messages[messages.length - 1].id;
         saveChatState(chatId, chatState);
     }
 
