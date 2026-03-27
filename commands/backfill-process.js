@@ -59,10 +59,19 @@ export async function processChunk(messages, chunkIndex, totalChunks, llmCallFn)
         if (error || !text) return null;
 
         const match = text.match(/\{[\s\S]*\}/);
-        if (!match) return null;
+        if (!match) {
+            console.warn(`[AnchorMemory] chunk ${chunkIndex+1}/${totalChunks}: no JSON object found in LLM response:\n`, text);
+            return null;
+        }
         // Strip trailing commas before ] or } (common LLM JSON mistake)
         const sanitized = match[0].replace(/,\s*([}\]])/g, '$1');
-        const parsed = JSON.parse(sanitized);
+        let parsed;
+        try {
+            parsed = JSON.parse(sanitized);
+        } catch (jsonErr) {
+            console.error(`[AnchorMemory] chunk ${chunkIndex+1}/${totalChunks}: JSON parse failed: ${jsonErr.message}\n--- raw LLM text ---\n${text}\n--- extracted JSON ---\n${sanitized}`);
+            return null;
+        }
 
         const ep = parsed.episode || {};
         const firstMsg = messages[0];
