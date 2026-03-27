@@ -98,11 +98,13 @@ function parseResponse(text) {
 }
 
 function formatMessages(messages, maxChars) {
+    const perMsg = Math.max(300, Math.floor(maxChars / (messages.length || 1)));
     const lines = [];
     let total = 0;
     for (const m of messages) {
         const name = m.name || (m.isUser ? 'User' : 'Character');
-        const line = `${name}: ${String(m.text || '').slice(0, 200)}`;
+        const raw = `${name}: ${String(m.text || '')}`;
+        const line = raw.length > perMsg ? `${raw.slice(0, perMsg - 3)}...` : raw;
         if (total + line.length > maxChars) break;
         lines.push(line);
         total += line.length;

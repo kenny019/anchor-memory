@@ -13,6 +13,7 @@
     "eval:rp": "node eval/run-rp-eval.js",
     "eval:rpbench": "node eval/run-rpbench-eval.js",
     "eval:extraction": "node eval/run-extraction-eval.js",
+    "eval:rp:diagnostic": "node eval/run-rp-diagnostic.js",
     "setup": "cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit"
   }
 }

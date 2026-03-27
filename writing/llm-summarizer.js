@@ -1,5 +1,6 @@
+import { formatMessagesForLLM } from './format-messages.js';
+
 const MAX_MESSAGES = 15;
-const MAX_MSG_CHARS = 200;
 const MAX_OUTPUT_CHARS = 600;
 
 const SYSTEM_PROMPT = 'You are a concise memory recorder for a roleplay session.';
@@ -11,14 +12,7 @@ export async function buildLLMSummary(messages, locations, llmCallFn) {
         return buildHeuristicSummary(messages || [], locations || []);
     }
 
-    const formatted = messages
-        .slice(-MAX_MESSAGES)
-        .map(m => {
-            const name = m.name || (m.isUser ? 'User' : 'Character');
-            const line = `${name}: ${String(m.text || '')}`;
-            return line.length > MAX_MSG_CHARS ? `${line.slice(0, MAX_MSG_CHARS - 3)}...` : line;
-        })
-        .join('\n');
+    const formatted = formatMessagesForLLM(messages, { totalBudget: 3000, maxMessages: MAX_MESSAGES });
 
     const locationLine = Array.isArray(locations) && locations.length > 0
         ? `\nLocations: ${locations.join(', ')}`
@@ -43,14 +37,7 @@ export async function buildLLMEpisodeSummary(messages, sceneCard, llmCallFn) {
         return null;
     }
 
-    const formatted = messages
-        .slice(-MAX_MESSAGES)
-        .map(m => {
-            const name = m.name || (m.isUser ? 'User' : 'Character');
-            const line = `${name}: ${String(m.text || '')}`;
-            return line.length > MAX_MSG_CHARS ? `${line.slice(0, MAX_MSG_CHARS - 3)}...` : line;
-        })
-        .join('\n');
+    const formatted = formatMessagesForLLM(messages, { totalBudget: 4000, maxMessages: MAX_MESSAGES });
 
     const locationLine = sceneCard?.location ? `\nLocation: ${sceneCard.location}` : '';
     const participantLine = sceneCard?.participants?.length ? `\nParticipants: ${sceneCard.participants.join(', ')}` : '';
@@ -100,10 +87,10 @@ export function buildHeuristicSummary(messages, locations) {
     if (!Array.isArray(locations)) locations = [];
 
     const excerpts = messages
-        .slice(-4)
+        .slice(-6)
         .map(message => `${message.name || (message.isUser ? 'User' : 'Character')}: ${String(message.text || '').replace(/\s+/g, ' ').trim()}`)
         .filter(Boolean)
-        .map(text => text.length > 140 ? `${text.slice(0, 137)}...` : text);
+        .map(text => text.length > 400 ? `${text.slice(0, 397)}...` : text);
 
     const locationText = locations.length > 0 ? `Location context: ${locations.join(', ')}. ` : '';
     return `${locationText}${excerpts.join(' ')}`.trim().slice(0, 600);

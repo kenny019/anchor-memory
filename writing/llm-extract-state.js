@@ -1,7 +1,8 @@
+import { formatMessagesForLLM } from './format-messages.js';
+
 const SYSTEM_PROMPT = 'You analyze roleplay scenes. Return ONLY valid JSON.';
 
 const MAX_MESSAGES = 12;
-const MAX_MSG_CHARS = 200;
 
 /**
  * LLM-based scene extraction + boundary detection.
@@ -15,11 +16,7 @@ export async function llmExtractScene({
     if (typeof llmCallFn !== 'function') return null;
 
     const recent = recentMessages.slice(-MAX_MESSAGES);
-    const formatted = recent.map(m => {
-        const name = m.name || (m.isUser ? 'User' : 'Character');
-        const line = `${name}: ${String(m.text || '')}`;
-        return line.length > MAX_MSG_CHARS ? `${line.slice(0, MAX_MSG_CHARS - 3)}...` : line;
-    }).join('\n');
+    const formatted = formatMessagesForLLM(recent, { totalBudget: 3500, maxMessages: MAX_MESSAGES });
 
     const prevLocation = chatState?.sceneCard?.location || '';
     const prevParticipants = (chatState?.sceneCard?.participants || []).join(', ') || '';

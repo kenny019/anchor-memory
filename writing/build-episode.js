@@ -50,17 +50,6 @@ function buildEpisodeTitle(sceneCard, locations, existingCount) {
     return `Episode ${existingCount + 1}`;
 }
 
-function buildSummary(messages, locations) {
-    const excerpts = messages
-        .slice(-4)
-        .map(message => `${message.name || (message.isUser ? 'User' : 'Character')}: ${String(message.text || '').replace(/\s+/g, ' ').trim()}`)
-        .filter(Boolean)
-        .map(text => text.length > 140 ? `${text.slice(0, 137)}...` : text);
-
-    const locationText = locations.length > 0 ? `Location context: ${locations.join(', ')}. ` : '';
-    return `${locationText}${excerpts.join(' ')}`.trim().slice(0, 600);
-}
-
 function buildTags(messages, locations) {
     const joined = messages.map(message => String(message.text || '').toLowerCase()).join(' ');
     const tags = [];
