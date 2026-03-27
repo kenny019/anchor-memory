@@ -1,5 +1,6 @@
 import { formatMessagesForLLM } from './format-messages.js';
 import { parseAndRepairJSON, parseCharacters } from '../llm/json-repair.js';
+import { isNarratorName, isSubstantiveMessage } from '../models/string-utils.js';
 
 const SYSTEM_PROMPT = 'You analyze roleplay scenes. Return ONLY valid JSON.';
 
@@ -16,20 +17,24 @@ export async function llmExtractScene({
 } = {}) {
     if (typeof llmCallFn !== 'function') return null;
 
-    const recent = recentMessages.slice(-MAX_MESSAGES);
+    const substantive = recentMessages.filter(isSubstantiveMessage);
+    const recent = substantive.slice(-MAX_MESSAGES);
     const formatted = formatMessagesForLLM(recent, { totalBudget: 12000, maxMessages: MAX_MESSAGES });
 
     const prevLocation = chatState?.sceneCard?.location || '';
     const prevParticipants = (chatState?.sceneCard?.participants || []).join(', ') || '';
     const lastBoundary = Number(chatState?.lastEpisodeBoundaryMessageId ?? -1);
     const messagesSinceBoundary = recentMessages.filter(m => Number(m.id) > lastBoundary).length;
+    const pressureNote = messagesSinceBoundary >= 6
+        ? ' This is getting long — strongly consider creating a boundary.'
+        : '';
 
     const prompt = `Analyze these recent roleplay messages.
 
 Recent messages (last ${recent.length}):
 ${formatted}
 
-${messagesSinceBoundary} messages have passed since the last episode boundary.
+${messagesSinceBoundary} messages have passed since the last episode boundary.${pressureNote}
 
 Previous scene state:
 - Location: ${prevLocation || '(none)'}
@@ -46,8 +51,8 @@ Return JSON:
     "participants": ["character name currently present in scene"]
   },
   "boundary": {
-    "shouldCreate": false,
-    "reason": "location_change|significant_event|dramatic_beat",
+    "shouldCreate": "<true_or_false>",
+    "reason": "location_change|significant_event|dramatic_beat|time_skip",
     "significance": 3,
     "title": "short descriptive title for the episode being closed"
   },
@@ -68,14 +73,15 @@ Rules:
 - location must be a concrete place, not an action, pose, or abstract concept
 - openThreads are unresolved narrative questions, NOT every dialogue question
 - participants MUST include ALL speaker names exactly as they appear in the messages
-- boundary.shouldCreate = true when: a scene/location change occurred, a significant event happened (betrayal, combat, revelation, death), or a natural dramatic beat concluded
+- boundary.shouldCreate = true when: a scene/location change occurred, a significant time skip occurred (e.g. "Three weeks later", "The next morning"), a significant event happened (betrayal, combat, revelation, death), or a natural dramatic beat concluded
+- Do NOT include "Narrator" or "System" as participants — only in-story character names
 - characters: include all named characters currently present in the scene (speaking, acting, or observing)
 - characters.knownInfo: only NEW facts learned this turn
 - omit characters merely referenced in dialogue but not physically present
 - return empty string for fields you cannot determine`;
 
     try {
-        const result = await llmCallFn({ prompt, systemPrompt: SYSTEM_PROMPT, maxTokens: 600 });
+        const result = await llmCallFn({ prompt, systemPrompt: SYSTEM_PROMPT, maxTokens: 800 });
         if (!result?.text) return null;
 
         const parsed = parseAndRepairJSON(result.text, 'scene extraction');
@@ -95,9 +101,10 @@ Rules:
                 ? scene.openThreads.map(t => String(t || '')).filter(Boolean).slice(0, 5)
                 : [],
             participants: Array.isArray(scene.participants)
-                ? scene.participants.map(p => String(p || '')).filter(Boolean).slice(0, 8)
+                ? scene.participants.map(p => String(p || '')).filter(Boolean)
+                    .filter(p => !isNarratorName(p)).slice(0, 8)
                 : [],
-            boundary: boundary?.shouldCreate ? {
+            boundary: (boundary?.shouldCreate === true || boundary?.shouldCreate === 'true') ? {
                 shouldCreate: true,
                 reason: String(boundary.reason || ''),
                 significance: Math.max(1, Math.min(5, Number(boundary.significance) || 2)),

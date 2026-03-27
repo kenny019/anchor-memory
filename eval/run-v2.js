@@ -653,6 +653,49 @@ import { computeEffectiveBudget } from '../core/budget.js';
 }
 
 {
+    // Recency boost: recent episode outscores older one with same keyword match
+    const epRecent = createEpisode({
+        id: 'recent-ep', title: 'Goblin Attack', summary: 'goblins at the mill',
+        keyFacts: [], significance: 2, participants: ['Elara'], messageEnd: 95,
+    });
+    const epOld = createEpisode({
+        id: 'old-ep', title: 'Goblin Sighting', summary: 'goblins near village',
+        keyFacts: [], significance: 3, participants: ['Mira'], messageEnd: 10,
+    });
+    const queryCtx = {
+        terms: ['goblin'],
+        sceneParticipants: [],
+        location: '',
+        openThreads: [],
+        currentMessageId: 100,
+    };
+    const scored = scoreEpisodes([epOld, epRecent], queryCtx);
+    assert('recency boost: recent episode outscores older with same keyword match',
+        scored[0].item.id === 'recent-ep',
+        `top=${scored[0].item.id} scores: recent=${scored.find(e => e.item.id === 'recent-ep')?.score.toFixed(1)} old=${scored.find(e => e.item.id === 'old-ep')?.score.toFixed(1)}`);
+}
+
+{
+    // Recency boost decays: very old episode gets near-zero boost
+    const epAncient = createEpisode({
+        id: 'ancient-ep', title: 'Old Event', summary: 'something',
+        keyFacts: [], significance: 2, participants: [], messageEnd: 5,
+    });
+    const queryCtx = {
+        terms: [],
+        sceneParticipants: [],
+        location: '',
+        openThreads: [],
+        currentMessageId: 500,
+    };
+    const scored = scoreEpisodes([epAncient], queryCtx);
+    // At distance 495, boost should be near 0 (4 * exp(-495/60) ≈ 0.001)
+    assert('recency boost decays for distant episodes',
+        scored[0].score < 2.1, // significance(2) + near-zero recency
+        `score=${scored[0].score.toFixed(2)}`);
+}
+
+{
     const eff5 = computeEffectiveBudget(5, 4000);
     assert('budget: chat.length=5 caps at 2000', eff5 === 2000, `got ${eff5}`);
 }
@@ -884,6 +927,158 @@ import { processChunk, buildEpisodePrompt, buildCharacterPrompt, CHUNK_SIZE } fr
     const result = await processChunk(msgs, 0, 1, llmStub);
     assert('processChunk: character failure still returns episode with empty characters',
         result !== null && result.episode.title === 'OK' && result.characters.length === 0);
+}
+
+// ==========================================
+// Group 10: Boundary & Filtering
+// ==========================================
+console.log('\n=== Group 10: Boundary & Filtering ===\n');
+
+import { mergeSceneCard } from '../models/state-cards.js';
+
+{
+    // Prompt contains time_skip trigger text
+    const llmStub = async ({ prompt }) => {
+        assert('prompt contains time_skip in boundary reason enum',
+            prompt.includes('time_skip'));
+        return { text: JSON.stringify({ scene: { location: 'x', participants: [] }, boundary: { shouldCreate: false } }), error: null };
+    };
+    await llmExtractScene({
+        recentMessages: [{ id: 1, text: 'hi', name: 'User', isUser: true }],
+        chatState: {},
+        llmCallFn: llmStub,
+    });
+}
+
+{
+    // Prompt does NOT contain "shouldCreate": false
+    const llmStub = async ({ prompt }) => {
+        assert('prompt does NOT anchor shouldCreate to false',
+            !prompt.includes('"shouldCreate": false'));
+        return { text: JSON.stringify({ scene: { location: 'x', participants: [] } }), error: null };
+    };
+    await llmExtractScene({
+        recentMessages: [{ id: 1, text: 'hi', name: 'User', isUser: true }],
+        chatState: {},
+        llmCallFn: llmStub,
+    });
+}
+
+{
+    // Message-count pressure appears at 6+ messages since boundary
+    const msgs = Array.from({ length: 8 }, (_, i) => ({ id: i + 1, text: `msg ${i}`, name: 'User', isUser: true }));
+    const llmStub = async ({ prompt }) => {
+        assert('pressure note appears when messagesSinceBoundary >= 6',
+            prompt.includes('strongly consider creating a boundary'));
+        return { text: JSON.stringify({ scene: { location: 'x', participants: [] } }), error: null };
+    };
+    await llmExtractScene({
+        recentMessages: msgs,
+        chatState: { lastEpisodeBoundaryMessageId: -1 },
+        llmCallFn: llmStub,
+    });
+}
+
+{
+    // No pressure at < 6 messages
+    const msgs = Array.from({ length: 4 }, (_, i) => ({ id: i + 1, text: `msg ${i}`, name: 'User', isUser: true }));
+    const llmStub = async ({ prompt }) => {
+        assert('no pressure note when messagesSinceBoundary < 6',
+            !prompt.includes('strongly consider creating a boundary'));
+        return { text: JSON.stringify({ scene: { location: 'x', participants: [] } }), error: null };
+    };
+    await llmExtractScene({
+        recentMessages: msgs,
+        chatState: { lastEpisodeBoundaryMessageId: -1 },
+        llmCallFn: llmStub,
+    });
+}
+
+{
+    // Narrator filtered from parsed participants
+    const llmStub = async () => ({
+        text: JSON.stringify({
+            scene: { location: 'forest', participants: ['Narrator', 'Luna', 'System', 'Kael'] },
+        }),
+        error: null,
+    });
+    const result = await llmExtractScene({
+        recentMessages: [{ id: 1, text: 'hi', name: 'User', isUser: true }],
+        chatState: {},
+        llmCallFn: llmStub,
+    });
+    assert('Narrator and System filtered from parsed participants',
+        result.participants.length === 2
+        && result.participants.includes('Luna')
+        && result.participants.includes('Kael')
+        && !result.participants.includes('Narrator')
+        && !result.participants.includes('System'));
+}
+
+{
+    // (Continue) messages filtered from formatMessagesForLLM output
+    const msgs = [
+        { name: 'User', text: '(Continue)', isUser: true },
+        { name: 'User', text: '(continue)', isUser: true },
+        { name: 'Elena', text: 'Hello there', isUser: false },
+    ];
+    const formatted = formatMessagesForLLM(msgs, { totalBudget: 3000, maxMessages: 15 });
+    assert('(Continue) messages filtered from formatMessagesForLLM',
+        !formatted.includes('(Continue)') && !formatted.includes('(continue)') && formatted.includes('Hello there'));
+}
+
+{
+    // Empty-text messages filtered from LLM input
+    const msgs = [
+        { name: 'User', text: '', isUser: true },
+        { name: 'User', text: '   ', isUser: true },
+        { name: 'Elena', text: 'Real message', isUser: false },
+    ];
+    const formatted = formatMessagesForLLM(msgs, { totalBudget: 3000, maxMessages: 15 });
+    assert('empty-text messages filtered from formatMessagesForLLM',
+        formatted.split('\n').length === 1 && formatted.includes('Real message'));
+}
+
+{
+    // llmExtractScene boundary with shouldCreate === true still works
+    const llmStub = async () => ({
+        text: JSON.stringify({
+            scene: { location: 'castle', participants: ['User'] },
+            boundary: { shouldCreate: true, reason: 'dramatic_beat', significance: 4, title: 'The Escape' },
+        }),
+        error: null,
+    });
+    const result = await llmExtractScene({
+        recentMessages: [{ id: 1, text: 'run!', name: 'User', isUser: true }],
+        chatState: {},
+        llmCallFn: llmStub,
+    });
+    assert('llmExtractScene boundary with shouldCreate === true works (regression)',
+        result?.boundary?.shouldCreate === true && result.boundary.title === 'The Escape');
+}
+
+{
+    // mergeSceneCard unions participants (new + existing, deduped)
+    const existing = { location: 'tavern', participants: ['Han Qi', 'Mira'] };
+    const incoming = { location: 'tavern', participants: ['Elara', 'Han Qi'] };
+    const merged = mergeSceneCard(existing, incoming, {});
+    assert('mergeSceneCard unions participants (new + existing, deduped)',
+        merged.participants.includes('Elara')
+        && merged.participants.includes('Han Qi')
+        && merged.participants.includes('Mira')
+        && merged.participants.length === 3);
+}
+
+{
+    // mergeSceneCard participant union caps at 8, new participants prioritized
+    const existing = { participants: ['A', 'B', 'C', 'D', 'E'] };
+    const incoming = { participants: ['F', 'G', 'H', 'I', 'J'] };
+    const merged = mergeSceneCard(existing, incoming, {});
+    assert('mergeSceneCard participant union caps at 8, new first',
+        merged.participants.length === 8
+        && merged.participants[0] === 'F'
+        && merged.participants.includes('G')
+        && merged.participants.includes('H'));
 }
 
 // ==========================================

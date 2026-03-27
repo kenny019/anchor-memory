@@ -17,6 +17,7 @@ import { llmExtractScene } from '../writing/llm-extract-state.js';
 import { buildLLMEpisodeSummary } from '../writing/llm-summarizer.js';
 import { consolidateEpisodes, applyConsolidation } from '../writing/consolidate-episodes.js';
 import { createLLMCaller } from '../llm/api.js';
+import { isNarratorName } from '../models/string-utils.js';
 
 export async function processCompletedTurn({
     chatState = null,
@@ -178,7 +179,7 @@ async function buildEpisode({
     const lastBoundary = Number(chatState.lastEpisodeBoundaryMessageId ?? -1);
     const candidates = messages.filter(m => Number(m.id) > lastBoundary);
     let boundary = sceneUpdate?.boundary || null;
-    if (candidates.length >= 25) {
+    if (candidates.length >= 15) {
         boundary = { shouldCreate: true, reason: 'forced', significance: 2, title: '' };
     }
     if (!boundary?.shouldCreate || candidates.length === 0) {
@@ -195,7 +196,7 @@ async function buildEpisode({
         episodeCandidate: createEpisode({
             messageStart: Number(candidates[0].id),
             messageEnd: Number(candidates[candidates.length - 1].id),
-            participants: sceneCard.participants || [],
+            participants: (sceneCard.participants || []).filter(p => !isNarratorName(p)),
             locations: sceneCard.location ? [sceneCard.location] : [],
             ...episodeSummary,
         }),

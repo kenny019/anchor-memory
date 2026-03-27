@@ -1,3 +1,5 @@
+import { isSubstantiveMessage } from '../models/string-utils.js';
+
 /**
  * Budget-based message formatting for LLM prompts.
  * Distributes a total char budget proportionally across messages
@@ -6,7 +8,8 @@
 export function formatMessagesForLLM(messages, { totalBudget = 3000, maxMessages = 15 } = {}) {
     if (!Array.isArray(messages) || messages.length === 0) return '';
 
-    const recent = messages.slice(-maxMessages);
+    const substantive = messages.filter(isSubstantiveMessage);
+    const recent = substantive.slice(-maxMessages);
     const lines = recent.map(m => {
         const name = m.name || (m.isUser ? 'User' : 'Character');
         return `${name}: ${String(m.text || '')}`;

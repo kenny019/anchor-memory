@@ -10,6 +10,9 @@ export function buildQueryContext({
     recentMessages = [],
     sceneCard = null,
 } = {}) {
+    const lastMsg = recentMessages.length > 0 ? recentMessages[recentMessages.length - 1] : null;
+    const currentMessageId = Number(lastMsg?.id) || 0;
+
     const recentText = recentMessages
         .slice(-3)
         .map(message => String(message?.text || message?.mes || ''))
@@ -30,6 +33,7 @@ export function buildQueryContext({
     const terms = [...new Set([...tokenize(recentText), ...tokenize(stateText)])];
 
     return {
+        currentMessageId,
         location: String(normalizedSceneCard.location || ''),
         openThreads,
         recentText,

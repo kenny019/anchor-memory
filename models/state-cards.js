@@ -77,7 +77,7 @@ export function mergeSceneCard(existingSceneCard, partialSceneCard, meta = {}) {
             ? (replaceThreads ? uniqueStrings(incoming.openThreads, 8) : uniqueStrings([...incoming.openThreads, ...existing.openThreads], 8))
             : existing.openThreads,
         participants: incoming.participants.length > 0
-            ? uniqueStrings(incoming.participants, 8)
+            ? uniqueStrings([...incoming.participants, ...existing.participants], 8)
             : existing.participants,
         updatedAtMessageId: Number.isFinite(Number(meta.updatedAtMessageId))
             ? Number(meta.updatedAtMessageId)
