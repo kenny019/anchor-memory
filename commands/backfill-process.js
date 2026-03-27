@@ -4,12 +4,12 @@
  */
 import { createEpisode } from '../models/episodes.js';
 import { formatMessagesForLLM } from '../writing/format-messages.js';
+import { parseAndRepairJSON, parseCharacters } from '../llm/json-repair.js';
 
 export const CHUNK_SIZE = 25;
-export const MAX_TOKENS = 1000;
+const SYSTEM_PROMPT = 'You analyze historical roleplay excerpts. Return ONLY valid JSON.';
 
-export function buildChunkPrompt(messages, chunkIndex, totalChunks) {
-    const formatted = formatMessagesForLLM(messages, { totalBudget: 6000, maxMessages: CHUNK_SIZE });
+export function buildEpisodePrompt(formatted, chunkIndex, totalChunks) {
     return [
         `Summarize this excerpt from a roleplay chat (chunk ${chunkIndex + 1} of ${totalChunks}).`,
         '',
@@ -18,91 +18,72 @@ export function buildChunkPrompt(messages, chunkIndex, totalChunks) {
         '',
         'Return JSON:',
         '{',
-        '  "episode": {',
-        '    "title": "short descriptive title (max 80 chars)",',
-        '    "summary": "2-3 sentences: who did what, what changed, why it matters (max 400 chars)",',
-        '    "tags": ["tag1", "tag2"],',
-        '    "significance": 3,',
-        '    "keyFacts": ["specific fact"],',
-        '    "participants": ["character name"],',
-        '    "location": "place name or empty string"',
-        '  },',
+        '  "title": "short descriptive title (max 80 chars)",',
+        '  "summary": "2-3 sentences: who did what, what changed, why it matters (max 400 chars)",',
+        '  "tags": ["tag1", "tag2"],',
+        '  "significance": 3,',
+        '  "keyFacts": ["specific fact"],',
+        '  "participants": ["character name"],',
+        '  "location": "place name or empty string"',
+        '}',
+        '',
+        'Rules:',
+        '- participants MUST include all speaker names exactly as they appear',
+        '- significance: 1=trivial, 3=notable, 5=pivotal',
+        '- return empty arrays/strings for absent fields',
+    ].join('\n');
+}
+
+export function buildCharacterPrompt(formatted, chunkIndex, totalChunks) {
+    return [
+        `Extract characters from this roleplay chat excerpt (chunk ${chunkIndex + 1} of ${totalChunks}).`,
+        '',
+        'Messages:',
+        formatted,
+        '',
+        'Return JSON:',
+        '{',
         '  "characters": [',
         '    {',
         '      "name": "canonical name",',
         '      "aliases": ["alt name"],',
         '      "relationship": "to protagonist",',
         '      "emotionalState": "mood",',
-        '      "knownInfo": ["fact from this excerpt"],',
+        '      "knownInfo": ["fact from this excerpt (max 2)"],',
         '      "goals": "motivation",',
-        '      "traits": ["trait"]',
+        '      "traits": ["trait (max 3)"]',
         '    }',
         '  ]',
         '}',
         '',
         'Rules:',
-        '- participants MUST include all speaker names exactly as they appear',
-        '- characters: only named characters who speak or act',
-        '- significance: 1=trivial, 3=notable, 5=pivotal',
+        '- only named characters who speak or act',
+        '- max 2 knownInfo items per character',
+        '- max 3 traits per character',
         '- return empty arrays/strings for absent fields',
     ].join('\n');
 }
 
 export async function processChunk(messages, chunkIndex, totalChunks, llmCallFn) {
     try {
-        const prompt = buildChunkPrompt(messages, chunkIndex, totalChunks);
-        const { text, error } = await llmCallFn({
-            prompt,
-            systemPrompt: 'You analyze historical roleplay excerpts. Return ONLY valid JSON.',
-            maxTokens: MAX_TOKENS,
-        });
-        if (error || !text) return null;
+        const formatted = formatMessagesForLLM(messages, { totalBudget: 6000, maxMessages: CHUNK_SIZE });
 
-        // Extract JSON — try full object first, fall back to truncation repair
-        let jsonStr = text.match(/\{[\s\S]*\}/)?.[0];
-        if (!jsonStr) {
-            // Response may be truncated — grab from first { to end and close open brackets
-            const startIdx = text.indexOf('{');
-            if (startIdx === -1) {
-                console.warn(`[AnchorMemory] chunk ${chunkIndex+1}/${totalChunks}: no JSON found in LLM response:\n`, text);
-                return null;
-            }
-            jsonStr = text.slice(startIdx);
-        }
-        // Strip trailing commas before ] or } (common LLM JSON mistake)
-        let sanitized = jsonStr.replace(/,\s*([}\]])/g, '$1');
-        // Repair truncated JSON: strip trailing incomplete value, then close open brackets
-        let parsed;
-        try {
-            parsed = JSON.parse(sanitized);
-        } catch {
-            // Remove any trailing partial string/value (e.g. `"Repe`)
-            sanitized = sanitized.replace(/,?\s*"[^"]*$/, '');
-            // Close unclosed brackets/braces
-            const opens = [];
-            let inStr = false;
-            let esc = false;
-            for (const ch of sanitized) {
-                if (esc) { esc = false; continue; }
-                if (ch === '\\' && inStr) { esc = true; continue; }
-                if (ch === '"') { inStr = !inStr; continue; }
-                if (inStr) continue;
-                if (ch === '{' || ch === '[') opens.push(ch);
-                else if (ch === '}' || ch === ']') opens.pop();
-            }
-            while (opens.length) {
-                sanitized += opens.pop() === '{' ? '}' : ']';
-            }
-            try {
-                parsed = JSON.parse(sanitized);
-                console.warn(`[AnchorMemory] chunk ${chunkIndex+1}/${totalChunks}: repaired truncated JSON`);
-            } catch (jsonErr) {
-                console.error(`[AnchorMemory] chunk ${chunkIndex+1}/${totalChunks}: JSON parse failed: ${jsonErr.message}\n--- raw LLM text ---\n${text}\n--- sanitized ---\n${sanitized}`);
-                return null;
-            }
-        }
+        const episodePrompt = buildEpisodePrompt(formatted, chunkIndex, totalChunks);
+        const characterPrompt = buildCharacterPrompt(formatted, chunkIndex, totalChunks);
 
-        const ep = parsed.episode || {};
+        const [episodeResult, characterResult] = await Promise.all([
+            llmCallFn({ prompt: episodePrompt, systemPrompt: SYSTEM_PROMPT, maxTokens: 500 }),
+            llmCallFn({ prompt: characterPrompt, systemPrompt: SYSTEM_PROMPT, maxTokens: 600 }),
+        ]);
+
+        const label = `chunk ${chunkIndex + 1}/${totalChunks}`;
+
+        // Episode is required
+        if (episodeResult.error || !episodeResult.text) return null;
+        const epParsed = parseAndRepairJSON(episodeResult.text, `${label} episode`);
+        if (!epParsed) return null;
+
+        const ep = epParsed.episode || epParsed;
         const firstMsg = messages[0];
         const lastMsg = messages[messages.length - 1];
 
@@ -119,17 +100,16 @@ export async function processChunk(messages, chunkIndex, totalChunks, llmCallFn)
             createdAtTs: Date.now() - (totalChunks - chunkIndex) * 1000,
         });
 
-        const characters = (Array.isArray(parsed.characters) ? parsed.characters : [])
-            .filter(c => c && String(c.name || '').trim())
-            .map(c => ({
-                name: String(c.name || '').trim(),
-                aliases: Array.isArray(c.aliases) ? c.aliases.map(String) : [],
-                relationship: String(c.relationship || ''),
-                emotionalState: String(c.emotionalState || ''),
-                knownInfo: Array.isArray(c.knownInfo) ? c.knownInfo.map(String) : [],
-                goals: String(c.goals || ''),
-                traits: Array.isArray(c.traits) ? c.traits.map(String) : [],
-            }));
+        // Characters are best-effort
+        let characters = [];
+        if (!characterResult.error && characterResult.text) {
+            const charParsed = parseAndRepairJSON(characterResult.text, `${label} characters`);
+            if (charParsed) {
+                const raw = Array.isArray(charParsed.characters) ? charParsed.characters
+                    : Array.isArray(charParsed) ? charParsed : [];
+                characters = parseCharacters(raw);
+            }
+        }
 
         return { episode, characters };
     } catch (err) {

@@ -148,7 +148,7 @@ export async function runBackfill() {
 
     const confirmed = await showConfirmDialog('Anchor Memory — Bulk Backfill', [
         `Messages: ${allMessages.length}`,
-        `LLM calls: ${chunkCount}`,
+        `LLM calls: ${chunkCount * 2}`,
         `Model: ${modelLabel}`,
         '',
         'This will RESET all existing memory and',

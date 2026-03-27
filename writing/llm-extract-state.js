@@ -1,4 +1,5 @@
 import { formatMessagesForLLM } from './format-messages.js';
+import { parseAndRepairJSON, parseCharacters } from '../llm/json-repair.js';
 
 const SYSTEM_PROMPT = 'You analyze roleplay scenes. Return ONLY valid JSON.';
 
@@ -77,15 +78,13 @@ Rules:
         const result = await llmCallFn({ prompt, systemPrompt: SYSTEM_PROMPT, maxTokens: 600 });
         if (!result?.text) return null;
 
-        const match = String(result.text).match(/\{[\s\S]*\}/);
-        if (!match) return null;
-
-        const parsed = JSON.parse(match[0].replace(/,\s*([}\]])/g, '$1'));
+        const parsed = parseAndRepairJSON(result.text, 'scene extraction');
+        if (!parsed) return null;
 
         // Handle both nested {scene, boundary} and flat format
         const scene = parsed.scene || parsed;
         const boundary = parsed.boundary || null;
-        const characters = parseCharacters(parsed.characters);
+        const characters = parseCharacters(parsed.characters || []);
 
         return {
             location: String(scene.location || ''),
@@ -112,19 +111,3 @@ Rules:
     }
 }
 
-// Lightweight parse — only filters out nameless entries and coerces types.
-// Cap enforcement is handled downstream by normalizeDossier via mergeDossier.
-function parseCharacters(raw) {
-    if (!Array.isArray(raw)) return [];
-    return raw
-        .filter(c => c && typeof c === 'object' && String(c.name || '').trim())
-        .map(c => ({
-            name: String(c.name || '').trim(),
-            aliases: Array.isArray(c.aliases) ? c.aliases.map(String).filter(Boolean) : [],
-            relationship: String(c.relationship || ''),
-            emotionalState: String(c.emotionalState || ''),
-            knownInfo: Array.isArray(c.knownInfo) ? c.knownInfo.map(String).filter(Boolean) : [],
-            goals: String(c.goals || ''),
-            traits: Array.isArray(c.traits) ? c.traits.map(String).filter(Boolean) : [],
-        }));
-}

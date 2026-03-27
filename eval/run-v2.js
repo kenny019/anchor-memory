@@ -758,49 +758,62 @@ import { formatMessagesForLLM } from '../writing/format-messages.js';
 // ==========================================
 console.log('\n=== Group 9: Backfill ===\n');
 
-import { processChunk, buildChunkPrompt, CHUNK_SIZE } from '../commands/backfill-process.js';
+import { processChunk, buildEpisodePrompt, buildCharacterPrompt, CHUNK_SIZE } from '../commands/backfill-process.js';
 
 {
-    // processChunk returns episode + characters from valid LLM response
+    // processChunk returns episode + characters from valid LLM response (2 parallel calls)
     const mockMessages = Array.from({ length: 5 }, (_, i) => ({
         id: i, name: i % 2 === 0 ? 'User' : 'Elena', text: `Message ${i}`, isUser: i % 2 === 0,
     }));
-    const llmStub = async () => ({
-        text: JSON.stringify({
-            episode: {
-                title: 'Test Episode',
-                summary: 'Something happened.',
-                tags: ['test'],
-                significance: 3,
-                keyFacts: ['a fact'],
-                participants: ['User', 'Elena'],
-                location: 'tavern',
-            },
-            characters: [
-                { name: 'Elena', aliases: ['E'], relationship: 'friend', emotionalState: 'happy', knownInfo: ['knows things'], goals: 'survive', traits: ['brave'] },
-            ],
-        }),
-        error: null,
-    });
+    const llmStub = async ({ prompt }) => {
+        if (prompt.includes('Summarize')) {
+            return {
+                text: JSON.stringify({
+                    title: 'Test Episode',
+                    summary: 'Something happened.',
+                    tags: ['test'],
+                    significance: 3,
+                    keyFacts: ['a fact'],
+                    participants: ['User', 'Elena'],
+                    location: 'tavern',
+                }),
+                error: null,
+            };
+        }
+        return {
+            text: JSON.stringify({
+                characters: [
+                    { name: 'Elena', aliases: ['E'], relationship: 'friend', emotionalState: 'happy', knownInfo: ['knows things'], goals: 'survive', traits: ['brave'] },
+                ],
+            }),
+            error: null,
+        };
+    };
     const result = await processChunk(mockMessages, 0, 2, llmStub);
     assert('processChunk returns episode + characters from valid response',
         result !== null && result.episode.title === 'Test Episode' && result.characters.length === 1 && result.characters[0].name === 'Elena');
 }
 
 {
-    // processChunk returns null on malformed response
+    // processChunk returns null on malformed episode response
     const mockMessages = [{ id: 0, name: 'User', text: 'hi', isUser: true }];
-    const llmStub = async () => ({ text: 'not json at all', error: null });
+    const llmStub = async ({ prompt }) => {
+        if (prompt.includes('Summarize')) return { text: 'not json at all', error: null };
+        return { text: JSON.stringify({ characters: [] }), error: null };
+    };
     const result = await processChunk(mockMessages, 0, 1, llmStub);
-    assert('processChunk returns null on malformed response', result === null);
+    assert('processChunk returns null on malformed episode response', result === null);
 }
 
 {
-    // processChunk returns null on LLM error
+    // processChunk returns null on episode LLM error
     const mockMessages = [{ id: 0, name: 'User', text: 'hi', isUser: true }];
-    const llmStub = async () => ({ text: null, error: 'timeout' });
+    const llmStub = async ({ prompt }) => {
+        if (prompt.includes('Summarize')) return { text: null, error: 'timeout' };
+        return { text: JSON.stringify({ characters: [] }), error: null };
+    };
     const result = await processChunk(mockMessages, 0, 1, llmStub);
-    assert('processChunk returns null on LLM error', result === null);
+    assert('processChunk returns null on episode LLM error', result === null);
 }
 
 {
@@ -810,13 +823,15 @@ import { processChunk, buildChunkPrompt, CHUNK_SIZE } from '../commands/backfill
         { id: 11, name: 'Elena', text: 'middle', isUser: false },
         { id: 12, name: 'User', text: 'end', isUser: true },
     ];
-    const llmStub = async () => ({
-        text: JSON.stringify({
-            episode: { title: 'Span Test', summary: 'test', tags: [], significance: 2, keyFacts: [], participants: [], location: '' },
-            characters: [],
-        }),
-        error: null,
-    });
+    const llmStub = async ({ prompt }) => {
+        if (prompt.includes('Summarize')) {
+            return {
+                text: JSON.stringify({ title: 'Span Test', summary: 'test', tags: [], significance: 2, keyFacts: [], participants: [], location: '' }),
+                error: null,
+            };
+        }
+        return { text: JSON.stringify({ characters: [] }), error: null };
+    };
     const result = await processChunk(mockMessages, 0, 1, llmStub);
     assert('processChunk sets correct messageStart/messageEnd from chunk',
         result.episode.messageStart === 10 && result.episode.messageEnd === 12);
@@ -831,27 +846,44 @@ import { processChunk, buildChunkPrompt, CHUNK_SIZE } from '../commands/backfill
 }
 
 {
-    // buildChunkPrompt returns string containing chunk index info and formatted messages
-    const msgs = [{ id: 0, name: 'User', text: 'Hello world', isUser: true }];
-    const prompt = buildChunkPrompt(msgs, 2, 10);
-    assert('buildChunkPrompt contains chunk index', prompt.includes('chunk 3 of 10'));
-    assert('buildChunkPrompt contains message content', prompt.includes('Hello world'));
+    // buildEpisodePrompt and buildCharacterPrompt return correct prompts
+    const formatted = 'User: Hello world';
+    const ep = buildEpisodePrompt(formatted, 2, 10);
+    assert('buildEpisodePrompt contains chunk index', ep.includes('chunk 3 of 10'));
+    assert('buildEpisodePrompt contains Summarize', ep.includes('Summarize'));
+    assert('buildEpisodePrompt contains message content', ep.includes('Hello world'));
+    const ch = buildCharacterPrompt(formatted, 2, 10);
+    assert('buildCharacterPrompt contains chunk index', ch.includes('chunk 3 of 10'));
+    assert('buildCharacterPrompt contains Extract characters', ch.includes('Extract characters'));
 }
 
 {
     // processChunk preserves chronological order via createdAtTs
     const msgs = [{ id: 0, name: 'User', text: 'hi', isUser: true }];
-    const llmStub = async () => ({
-        text: JSON.stringify({
-            episode: { title: 'T', summary: 'S', tags: [], significance: 2, keyFacts: [], participants: [], location: '' },
-            characters: [],
-        }),
-        error: null,
-    });
+    const llmStub = async ({ prompt }) => {
+        if (prompt.includes('Summarize')) {
+            return { text: JSON.stringify({ title: 'T', summary: 'S', tags: [], significance: 2, keyFacts: [], participants: [], location: '' }), error: null };
+        }
+        return { text: JSON.stringify({ characters: [] }), error: null };
+    };
     const r1 = await processChunk(msgs, 0, 10, llmStub);
     const r2 = await processChunk(msgs, 5, 10, llmStub);
     assert('processChunk: earlier chunk gets earlier createdAtTs',
         r1.episode.createdAtTs < r2.episode.createdAtTs);
+}
+
+{
+    // Character failure still returns episode (best-effort)
+    const msgs = [{ id: 0, name: 'User', text: 'hi', isUser: true }];
+    const llmStub = async ({ prompt }) => {
+        if (prompt.includes('Summarize')) {
+            return { text: JSON.stringify({ title: 'OK', summary: 'ok', tags: [], significance: 2, keyFacts: [], participants: [], location: '' }), error: null };
+        }
+        return { text: null, error: 'timeout' };
+    };
+    const result = await processChunk(msgs, 0, 1, llmStub);
+    assert('processChunk: character failure still returns episode with empty characters',
+        result !== null && result.episode.title === 'OK' && result.characters.length === 0);
 }
 
 // ==========================================
