@@ -1,6 +1,9 @@
 import { extension_prompt_types, setExtensionPrompt } from '../../../../../script.js';
 import { extension_settings } from '../../../../extensions.js';
 
+import { DEFAULT_CANDIDATE_COUNT } from './budget.js';
+export { DEFAULT_CANDIDATE_COUNT };
+
 const EXTENSION_NAME = 'anchor-memory';
 const PROMPT_KEY = 'anchor_memory_prompt';
 
@@ -22,8 +25,8 @@ const DEFAULT_SETTINGS = {
     autoConsolidation: true,
 
     // Retrieval
-    retrievalCandidateCount: 8,
-    retrievalChunkSize: 10,
+    retrievalCandidateCount: DEFAULT_CANDIDATE_COUNT,
+    retrievalChunkSize: 5,
     rerankTimeoutMs: 5000,
 
     // Memory format

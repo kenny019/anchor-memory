@@ -2,11 +2,11 @@ import { EPISODE_TYPE } from '../models/episodes.js';
 
 const BATCH_CONCURRENCY = 5;
 
-export async function rlmRetrieve({
+export async function llmRerank({
     episodes = [],
     queryContext = {},
     llmCallFn,
-    chunkSize = 10,
+    chunkSize = 5,
     maxResults = 3,
     keywordFallbackFn = null,
 } = {}) {
@@ -47,7 +47,7 @@ export async function rlmRetrieve({
     }
 
     if (!anySuccess && keywordFallbackFn) {
-        console.warn('[AnchorMemory] RLM retrieval: all chunks failed, falling back to keyword scoring');
+        console.warn('[AnchorMemory] LLM reranking: all chunks failed, falling back to keyword scoring');
         return keywordFallbackFn();
     }
 
@@ -58,8 +58,9 @@ export async function rlmRetrieve({
 
 async function scanChunk(chunk, sceneContext, llmCallFn) {
     const episodeList = chunk.map((ep, i) => {
-        const summary = (ep.summary || '').slice(0, 150);
-        const parts = [`${i + 1}. ${(ep.title || 'Untitled').slice(0, 100)} — ${summary}`];
+        const parts = [`${i + 1}. ${(ep.title || 'Untitled').slice(0, 100)}`];
+        if (ep.summary) parts.push(`   ${ep.summary}`);
+        if (ep.keyFacts?.length) parts.push(`   Key facts: ${ep.keyFacts.join('; ')}`);
         if (ep.participants?.length) parts.push(`   Participants: ${ep.participants.join(', ')}`);
         if (ep.locations?.length) parts.push(`   Locations: ${ep.locations.join(', ')}`);
         return parts.join('\n');
@@ -105,7 +106,7 @@ function parseChunkResponse(text, chunk) {
                 hits.push({
                     item: chunk[idx],
                     score,
-                    reasons: ['rlm_relevant'],
+                    reasons: ['llm_relevant'],
                 });
             }
         }

@@ -1,23 +1,4 @@
-function toCleanString(value) {
-    return String(value || '').replace(/\s+/g, ' ').trim();
-}
-
-function uniqueStrings(values, limit = Infinity) {
-    const seen = new Set();
-    const result = [];
-
-    for (const value of values || []) {
-        const normalized = toCleanString(value);
-        if (!normalized) continue;
-        const key = normalized.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        result.push(normalized);
-        if (result.length >= limit) break;
-    }
-
-    return result;
-}
+import { toCleanString, uniqueStrings } from './string-utils.js';
 
 export function createSceneCard({
     location = '',

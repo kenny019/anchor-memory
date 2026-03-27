@@ -33,8 +33,9 @@ If a memory call fails, Anchor Memory fails closed for that turn: it injects not
 ## Features
 
 - Scene continuity tracking: location, time, goals, conflicts, participants, open threads
+- Character dossiers: per-character persistent state (relationship, traits, goals, known facts) extracted each turn
 - Episode memory: structured summaries with significance, tags, and key facts
-- Retrieval pipeline: deterministic prefilter plus LLM verification on capped candidates
+- Retrieval pipeline: deterministic prefilter plus LLM reranking on capped candidates
 - Hierarchical consolidation: merge older episodes into higher-level semantic memories
 - Archived recall: keep older memories searchable through the optional `recall_memory` tool
 
@@ -78,14 +79,15 @@ If a memory call fails, Anchor Memory fails closed for that turn: it injects not
 
 ## Storage
 
-All memory is stored in SillyTavern chat metadata under `anchor_memory`.
+Memory is stored in IndexedDB via `SillyTavern.libs.localforage`, keyed per chat.
 
-- Scene card: overwritten each turn
-- Episodes: active and archived episode memories
-- Active cap: 100 episodes
-- Archived cap: 200 episodes
+- `am:{chatId}:state` — scene card, episodes, processing state
+- `am:{chatId}:dossiers` — per-character dossiers
+- Active episode cap: 100
+- Archived episode cap: 200
+- Character cap: 15 per chat
 
-Deleting a chat deletes its memory state.
+An in-memory cache keeps reads synchronous. Writes are debounced (300ms) with critical writes (episode creation) flushed immediately.
 
 ## Development
 
@@ -94,13 +96,17 @@ Deleting a chat deletes its memory state.
 ```text
 anchor-memory/
   core/
+    localforage-store.js
+    dossier-store.js
     memory-config.js
     messages.js
     settings.js
     storage.js
   models/
+    dossiers.js
     episodes.js
     state-cards.js
+    string-utils.js
   runtime/
     generation-hook.js
     postgen-hook.js
@@ -109,7 +115,7 @@ anchor-memory/
     query-builder.js
     score-episodes.js
     score-state.js
-    rlm-retriever.js
+    llm-reranker.js
     deep-retriever.js
     query-refiner.js
     selector.js
@@ -128,6 +134,7 @@ anchor-memory/
     panel.js
   eval/
     run.js
+    run-v2.js
 ```
 
 ### Verification

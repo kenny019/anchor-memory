@@ -5,7 +5,7 @@ const SYSTEM_PROMPT = 'You analyze roleplay scenes. Return ONLY valid JSON.';
 const MAX_MESSAGES = 12;
 
 /**
- * LLM-based scene extraction + boundary detection.
+ * LLM-based scene extraction + boundary detection + character deltas.
  * Returns null on failure (caller handles fallback).
  */
 export async function llmExtractScene({
@@ -49,7 +49,18 @@ Return JSON:
     "reason": "location_change|significant_event|dramatic_beat",
     "significance": 3,
     "title": "short descriptive title for the episode being closed"
-  }
+  },
+  "characters": [
+    {
+      "name": "canonical name",
+      "aliases": ["alternate name"],
+      "relationship": "relationship to protagonist",
+      "emotionalState": "current mood",
+      "knownInfo": ["new fact learned THIS turn only"],
+      "goals": "current motivation",
+      "traits": ["observable personality trait"]
+    }
+  ]
 }
 
 Rules:
@@ -57,10 +68,13 @@ Rules:
 - openThreads are unresolved narrative questions, NOT every dialogue question
 - participants MUST include ALL speaker names exactly as they appear in the messages
 - boundary.shouldCreate = true when: a scene/location change occurred, a significant event happened (betrayal, combat, revelation, death), or a natural dramatic beat concluded
+- characters: only include characters who DID something or REVEALED something this turn
+- characters.knownInfo: only NEW facts, not previously known information
+- do not include characters merely mentioned in passing
 - return empty string for fields you cannot determine`;
 
     try {
-        const result = await llmCallFn({ prompt, systemPrompt: SYSTEM_PROMPT, maxTokens: 300 });
+        const result = await llmCallFn({ prompt, systemPrompt: SYSTEM_PROMPT, maxTokens: 450 });
         if (!result?.text) return null;
 
         const match = String(result.text).match(/\{[\s\S]*\}/);
@@ -71,6 +85,7 @@ Rules:
         // Handle both nested {scene, boundary} and flat format
         const scene = parsed.scene || parsed;
         const boundary = parsed.boundary || null;
+        const characters = parseCharacters(parsed.characters);
 
         return {
             location: String(scene.location || ''),
@@ -89,9 +104,27 @@ Rules:
                 significance: Math.max(1, Math.min(5, Number(boundary.significance) || 2)),
                 title: String(boundary.title || ''),
             } : null,
+            characters,
         };
     } catch (error) {
         console.warn('[AnchorMemory] LLM extraction failed:', error?.message);
         return null;
     }
+}
+
+// Lightweight parse — only filters out nameless entries and coerces types.
+// Cap enforcement is handled downstream by normalizeDossier via mergeDossier.
+function parseCharacters(raw) {
+    if (!Array.isArray(raw)) return [];
+    return raw
+        .filter(c => c && typeof c === 'object' && String(c.name || '').trim())
+        .map(c => ({
+            name: String(c.name || '').trim(),
+            aliases: Array.isArray(c.aliases) ? c.aliases.map(String).filter(Boolean) : [],
+            relationship: String(c.relationship || ''),
+            emotionalState: String(c.emotionalState || ''),
+            knownInfo: Array.isArray(c.knownInfo) ? c.knownInfo.map(String).filter(Boolean) : [],
+            goals: String(c.goals || ''),
+            traits: Array.isArray(c.traits) ? c.traits.map(String).filter(Boolean) : [],
+        }));
 }

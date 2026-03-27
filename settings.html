@@ -12,37 +12,6 @@
   </div>
 
   <div class="am-card">
-    <h4>Retrieval</h4>
-    <label class="am-field">
-      <span>Preserve recent messages</span>
-      <input id="am_preserve_recent_messages" type="number" min="1" step="1" />
-    </label>
-    <label class="am-field">
-      <span>Max episodes</span>
-      <input id="am_max_episodes" type="number" min="1" step="1" />
-    </label>
-    <label class="am-field">
-      <span>Prompt position</span>
-      <select id="am_prompt_position">
-        <option value="in_chat">In Chat</option>
-        <option value="in_prompt">In Prompt</option>
-        <option value="before_prompt">Before Prompt</option>
-      </select>
-    </label>
-    <label class="am-field">
-      <span>Prompt depth</span>
-      <input id="am_prompt_depth" type="number" min="0" step="1" />
-    </label>
-    <label class="am-field">
-      <span>Memory format</span>
-      <select id="am_memory_format">
-        <option value="text">Plain Text</option>
-        <option value="xml">XML (recommended for Claude/GPT)</option>
-      </select>
-    </label>
-  </div>
-
-  <div class="am-card">
     <h4>Memory Model</h4>
     <p class="am-hint">Required. Memory stays inactive until both fields are set.</p>
     <label class="am-field">
@@ -53,63 +22,41 @@
       <span>Model ID</span>
       <input id="am_memory_model" type="text" placeholder="e.g. openai/gpt-5.4-nano" />
     </label>
+  </div>
 
-    <details class="am-advanced">
-      <summary>Advanced</summary>
+  <div class="am-card">
+    <h4>Prompt</h4>
+    <label class="am-field">
+      <span>Position</span>
+      <select id="am_prompt_position">
+        <option value="in_chat">In Chat</option>
+        <option value="in_prompt">In Prompt</option>
+        <option value="before_prompt">Before Prompt</option>
+      </select>
+    </label>
+    <label class="am-field">
+      <span>Depth</span>
+      <input id="am_prompt_depth" type="number" min="0" step="1" />
+    </label>
+    <label class="am-field">
+      <span>Format</span>
+      <select id="am_memory_format">
+        <option value="text">Plain Text</option>
+        <option value="xml">XML (recommended for Claude/GPT)</option>
+      </select>
+    </label>
+  </div>
 
-      <h5>Retrieval</h5>
-      <label class="am-field">
-        <span>Candidate count</span>
-        <input id="am_retrieval_candidate_count" type="number" min="3" max="20" step="1" />
-      </label>
-      <label class="am-field">
-        <span>Chunk size</span>
-        <input id="am_retrieval_chunk_size" type="number" min="3" max="20" step="1" />
-      </label>
-
-      <h5>Consolidation</h5>
-      <label>
-        <input id="am_llm_consolidation" type="checkbox" />
-        Enable LLM consolidation
-      </label>
-      <label>
-        <input id="am_auto_consolidation" type="checkbox" checked />
-        Auto-consolidate when threshold reached
-      </label>
-      <label class="am-field">
-        <span>Threshold</span>
-        <input id="am_consolidation_threshold" type="number" min="10" step="5" />
-      </label>
-      <label class="am-field">
-        <span>Max consolidation depth</span>
-        <input id="am_max_consolidation_depth" type="number" min="1" max="5" step="1" />
-      </label>
-      <label class="am-field">
-        <span>Min cluster size (fanout)</span>
-        <input id="am_consolidation_fanout" type="number" min="2" max="10" step="1" />
-      </label>
-      <button id="am_consolidate_now" class="menu_button">Consolidate Now</button>
-
-      <h5>Archived Search</h5>
-      <label>
-        <input id="am_archived_search_enabled" type="checkbox" checked />
-        Search archived episodes in recall tool
-      </label>
-      <label class="am-field">
-        <span>Archived score penalty (0-1)</span>
-        <input id="am_archived_score_penalty" type="number" min="0" max="1" step="0.1" />
-      </label>
-      <label class="am-field">
-        <span>Max archived results</span>
-        <input id="am_archived_max_results" type="number" min="0" max="10" step="1" />
-      </label>
-
-      <h5>Memory Tool</h5>
-      <label>
-        <input id="am_memory_tool_enabled" type="checkbox" />
-        Register recall_memory tool (model calls it on demand)
-      </label>
-    </details>
+  <div class="am-card">
+    <h4>Features</h4>
+    <label>
+      <input id="am_llm_consolidation" type="checkbox" />
+      Consolidate older episodes into higher-level memories
+    </label>
+    <label>
+      <input id="am_memory_tool_enabled" type="checkbox" />
+      Register recall_memory tool (model calls it on demand)
+    </label>
   </div>
 
   <div class="am-card">

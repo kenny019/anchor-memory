@@ -1,9 +1,8 @@
 import { getContext } from '../../../../st-context.js';
-import { saveMetadataDebounced } from '../../../../extensions.js';
 import { normalizeEpisode } from '../models/episodes.js';
 import { createSceneCard, normalizeSceneCard } from '../models/state-cards.js';
+import { getCached, setCached, loadChat, persistNow, COL_STATE, COL_DOSSIERS } from './localforage-store.js';
 
-export const CHAT_METADATA_KEY = 'anchor_memory';
 const retrievalSnapshotStore = new Map();
 
 export function createEmptyChatState(chatId = 'default-chat') {
@@ -49,33 +48,35 @@ export function getActiveChatId() {
 }
 
 export function ensureChatState(chatId = getActiveChatId()) {
-    const context = getContext();
-    const current = context.chatMetadata?.[CHAT_METADATA_KEY];
-    const normalized = normalizeChatState(current, chatId);
-    if (!context.chatMetadata[CHAT_METADATA_KEY]) {
-        context.chatMetadata[CHAT_METADATA_KEY] = normalized;
-        saveMetadataDebounced();
-    }
-    return normalized;
+    const current = getCached(chatId, COL_STATE);
+    if (current) return normalizeChatState(current, chatId);
+    const empty = createEmptyChatState(chatId);
+    setCached(chatId, COL_STATE, empty);
+    return empty;
 }
 
 export function getChatState(chatId = getActiveChatId()) {
-    const context = getContext();
-    return normalizeChatState(context.chatMetadata?.[CHAT_METADATA_KEY], chatId);
+    return normalizeChatState(getCached(chatId, COL_STATE), chatId);
 }
 
 export function saveChatState(chatId, chatState) {
-    const context = getContext();
     const normalized = normalizeChatState(chatState, chatId);
-    context.chatMetadata[CHAT_METADATA_KEY] = normalized;
-    saveMetadataDebounced();
+    setCached(chatId, COL_STATE, normalized);
     return normalized;
 }
 
 export function resetChatState(chatId = getActiveChatId()) {
     const empty = createEmptyChatState(chatId);
-    return saveChatState(chatId, empty);
+    setCached(chatId, COL_STATE, empty);
+    setCached(chatId, COL_DOSSIERS, {});
+    return empty;
 }
+
+export async function preloadChat(chatId) {
+    await loadChat(chatId);
+}
+
+export { persistNow };
 
 export function setRetrievalSnapshot(chatId, snapshot) {
     if (!snapshot) {

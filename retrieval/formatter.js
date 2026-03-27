@@ -1,42 +1,106 @@
 export function formatMemoryBlock({
     sceneCard = null,
     episodes = [],
+    dossiers = [],
     maxChars = 4000,
     format = 'text',
 } = {}) {
     if (format === 'xml') {
-        return formatXml({ sceneCard, episodes, maxChars });
+        return formatXml({ sceneCard, episodes, dossiers, maxChars });
     }
-    return formatText({ sceneCard, episodes, maxChars });
+    return formatText({ sceneCard, episodes, dossiers, maxChars });
 }
 
-// --- Text format (original) ---
+export function formatToolResult({
+    sceneCard = null,
+    episodes = [],
+    dossiers = [],
+    maxChars = 6000,
+} = {}) {
+    const sections = [];
 
-function formatText({ sceneCard, episodes, maxChars }) {
+    // Scene
+    const sceneLines = buildSceneLines(sceneCard);
+    if (sceneLines.length > 0) {
+        sections.push(`## Current Scene\n${sceneLines.join('\n')}`);
+    }
+
+    // Characters
+    const charLines = buildDossierLinesText(dossiers);
+    if (charLines.length > 0) {
+        sections.push(`## Characters\n${charLines.join('\n')}`);
+    }
+
+    // Episodes
+    if (episodes.length > 0) {
+        const epBlocks = [];
+        for (const [i, ep] of episodes.entries()) {
+            const lines = [`### ${i + 1}. ${ep.title || 'Untitled'}`];
+            const meta = [];
+            if (ep.significance != null) meta.push(`Significance: ${ep.significance}`);
+            if (ep.tags?.length) meta.push(`Tags: ${ep.tags.join(', ')}`);
+            if (meta.length) lines.push(meta.join(' | '));
+            if (ep.summary) lines.push(ep.summary);
+            if (ep.keyFacts?.length) {
+                lines.push('Key Facts:');
+                for (const fact of ep.keyFacts) lines.push(`- ${fact}`);
+            }
+            epBlocks.push(lines.join('\n'));
+        }
+        sections.push(`## Matched Memories (${episodes.length} result${episodes.length !== 1 ? 's' : ''})\n\n${epBlocks.join('\n\n')}`);
+    }
+
+    if (sections.length === 0) return '';
+    const result = sections.join('\n\n');
+    if (result.length > maxChars) return result.slice(0, maxChars);
+    return result;
+}
+
+// --- Text format ---
+
+function formatText({ sceneCard, episodes, dossiers, maxChars }) {
     const sceneLines = buildSceneLines(sceneCard);
     const hasScene = sceneLines.length > 0;
     const header = '[Anchor Memory]';
     const sceneSection = `[Current Scene State]\n${hasScene ? sceneLines.join('\n') : '- None'}`;
 
-    if (!hasScene && episodes.length === 0) {
+    const dossierLines = buildDossierLinesText(dossiers);
+    const dossierSection = dossierLines.length > 0 ? `[Active Characters]\n${dossierLines.join('\n')}` : '';
+
+    if (!hasScene && episodes.length === 0 && !dossierSection) {
         return '';
     }
 
-    let block = `${header}\n\n${sceneSection}\n\n[Relevant Past Events]\n- None`;
-    const formattedEpisodes = [];
+    const baseParts = [header, '', sceneSection];
+    if (dossierSection) {
+        // Budget check: soft-cap dossier section
+        const sceneLen = `${header}\n\n${sceneSection}`.length;
+        const available = maxChars - sceneLen;
+        const softCap = dossiers.length <= 3 ? available * 0.5 : available * 0.25;
+        if (dossierSection.length <= softCap || dossierSection.length <= 200) {
+            baseParts.push('', dossierSection);
+        } else {
+            baseParts.push('', dossierSection.slice(0, Math.max(200, Math.floor(softCap))));
+        }
+    }
+
+    const prefix = baseParts.join('\n');
+    const noneBlock = `${prefix}\n\n[Relevant Past Events]\n- None`;
+    let block = noneBlock;
+    let episodesJoined = '';
 
     for (const [index, episode] of episodes.entries()) {
         const nextEpisode = formatEpisodeText(episode, index);
-        const candidateEpisodes = [...formattedEpisodes, nextEpisode].join('\n\n');
-        const candidateBlock = `${header}\n\n${sceneSection}\n\n[Relevant Past Events]\n${candidateEpisodes}`;
-        if (candidateBlock.length > maxChars && formattedEpisodes.length > 0) {
+        const candidate = episodesJoined ? `${episodesJoined}\n\n${nextEpisode}` : nextEpisode;
+        const candidateBlock = `${prefix}\n\n[Relevant Past Events]\n${candidate}`;
+        if (candidateBlock.length > maxChars && episodesJoined) {
             break;
         }
         if (candidateBlock.length > maxChars) {
-            block = `${header}\n\n${sceneSection}\n\n[Relevant Past Events]\n- None`;
+            block = noneBlock;
             break;
         }
-        formattedEpisodes.push(nextEpisode);
+        episodesJoined = candidate;
         block = candidateBlock;
     }
 
@@ -51,30 +115,35 @@ function formatEpisodeText(episode, index) {
 
 // --- XML format ---
 
-function formatXml({ sceneCard, episodes, maxChars }) {
+function formatXml({ sceneCard, episodes, dossiers, maxChars }) {
     const sceneXml = buildSceneXml(sceneCard);
     const hasScene = sceneXml.length > 0;
+    const dossierXml = buildDossierXml(dossiers);
 
-    if (!hasScene && episodes.length === 0) {
+    if (!hasScene && episodes.length === 0 && !dossierXml) {
         return '';
     }
 
     const sceneBlock = hasScene ? `<scene>\n${sceneXml}\n</scene>` : '<scene/>';
-    let block = `<anchor_memory>\n${sceneBlock}\n<events/>\n</anchor_memory>`;
-    const formattedEpisodes = [];
+    const charBlock = dossierXml ? `\n${dossierXml}\n` : '';
+
+    const xmlPrefix = `<anchor_memory>\n${sceneBlock}${charBlock}`;
+    const noneBlock = `${xmlPrefix}\n<events/>\n</anchor_memory>`;
+    let block = noneBlock;
+    let eventsJoined = '';
 
     for (const episode of episodes) {
         const nextEpisode = formatEpisodeXml(episode);
-        const candidateEpisodes = [...formattedEpisodes, nextEpisode].join('\n');
-        const candidateBlock = `<anchor_memory>\n${sceneBlock}\n<events>\n${candidateEpisodes}\n</events>\n</anchor_memory>`;
-        if (candidateBlock.length > maxChars && formattedEpisodes.length > 0) {
+        const candidate = eventsJoined ? `${eventsJoined}\n${nextEpisode}` : nextEpisode;
+        const candidateBlock = `${xmlPrefix}\n<events>\n${candidate}\n</events>\n</anchor_memory>`;
+        if (candidateBlock.length > maxChars && eventsJoined) {
             break;
         }
         if (candidateBlock.length > maxChars) {
-            block = `<anchor_memory>\n${sceneBlock}\n<events/>\n</anchor_memory>`;
+            block = noneBlock;
             break;
         }
-        formattedEpisodes.push(nextEpisode);
+        eventsJoined = candidate;
         block = candidateBlock;
     }
 
@@ -102,6 +171,22 @@ function formatEpisodeXml(episode) {
     return `<event${sig}${tags}>\n${title}\n${summary}${facts}\n</event>`;
 }
 
+function buildDossierXml(dossiers) {
+    if (!Array.isArray(dossiers) || dossiers.length === 0) return '';
+    const entries = dossiers.map(d => {
+        const attrs = [`name="${escXml(d.name || '')}"`];
+        if (d.aliases?.length) attrs.push(`aliases="${escXml(d.aliases.join(', '))}"`);
+        const inner = [];
+        if (d.relationship) inner.push(`<relationship>${escXml(d.relationship)}</relationship>`);
+        if (d.emotionalState) inner.push(`<mood>${escXml(d.emotionalState)}</mood>`);
+        if (d.goals) inner.push(`<goals>${escXml(d.goals)}</goals>`);
+        if (d.knownInfo?.length) inner.push(`<known>${escXml(d.knownInfo.join('; '))}</known>`);
+        if (d.traits?.length) inner.push(`<traits>${escXml(d.traits.join(', '))}</traits>`);
+        return `<character ${attrs.join(' ')}>\n${inner.join('\n')}\n</character>`;
+    });
+    return `<characters>\n${entries.join('\n')}\n</characters>`;
+}
+
 // --- Shared helpers ---
 
 function buildSceneLines(sceneCard) {
@@ -115,8 +200,24 @@ function buildSceneLines(sceneCard) {
     return lines;
 }
 
+function buildDossierLinesText(dossiers) {
+    if (!Array.isArray(dossiers) || dossiers.length === 0) return [];
+    return dossiers.map(d => {
+        const parts = [];
+        const nameStr = d.name || 'Unknown';
+        const aliasStr = d.aliases?.length ? ` (aka "${d.aliases.join('", "')}")` : '';
+        parts.push(`- ${nameStr}${aliasStr}:`);
+        if (d.relationship) parts.push(d.relationship);
+        if (d.emotionalState) parts.push(d.emotionalState);
+        if (d.traits?.length) parts.push(`Traits: ${d.traits.join(', ')}`);
+        if (d.goals) parts.push(`Goals: ${d.goals}`);
+        if (d.knownInfo?.length) parts.push(`Knows: ${d.knownInfo.join(', ')}`);
+        return parts.join(' | ');
+    });
+}
+
 function escXml(str) {
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function truncate(text, maxLength) {

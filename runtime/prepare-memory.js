@@ -1,14 +1,17 @@
+import { DEFAULT_CANDIDATE_COUNT } from '../core/budget.js';
 import { buildQueryContext } from '../retrieval/query-builder.js';
 import { scoreSceneCard } from '../retrieval/score-state.js';
 import { scoreEpisodes } from '../retrieval/score-episodes.js';
 import { selectMemoryItems } from '../retrieval/selector.js';
 import { formatMemoryBlock } from '../retrieval/formatter.js';
-import { rlmRetrieve } from '../retrieval/rlm-retriever.js';
+import { llmRerank } from '../retrieval/llm-reranker.js';
 import { deepRetrieve } from '../retrieval/deep-retriever.js';
 import { refineQuery } from '../retrieval/query-refiner.js';
+import { getActiveDossiers } from '../core/dossier-store.js';
 
 export async function prepareGenerationMemoryData({
     chatState,
+    chatId = null,
     recentMessages = [],
     allMessages = [],
     settings = {},
@@ -21,7 +24,7 @@ export async function prepareGenerationMemoryData({
 
     const scoredSceneCard = scoreSceneCard(chatState?.sceneCard || null, queryContext);
     const keywordRanked = scoreEpisodes(chatState?.episodes || [], queryContext);
-    const candidateCount = Number(settings.retrievalCandidateCount) || 8;
+    const candidateCount = Number(settings.retrievalCandidateCount) || DEFAULT_CANDIDATE_COUNT;
     let queryCtx = queryContext;
     let scoredEpisodes = keywordRanked.slice(0, candidateCount);
 
@@ -32,11 +35,11 @@ export async function prepareGenerationMemoryData({
             scoredEpisodes = scoreEpisodes(chatState?.episodes || [], queryCtx).slice(0, candidateCount);
         }
 
-        scoredEpisodes = await rlmRetrieve({
+        scoredEpisodes = await llmRerank({
             episodes: scoredEpisodes.map(entry => entry.item),
             queryContext: queryCtx,
             llmCallFn,
-            chunkSize: Number(settings.retrievalChunkSize) || 10,
+            chunkSize: Number(settings.retrievalChunkSize) || 5,
             maxResults: candidateCount,
             keywordFallbackFn: () => scoreEpisodes(chatState?.episodes || [], queryCtx).slice(0, candidateCount),
         });
@@ -58,8 +61,16 @@ export async function prepareGenerationMemoryData({
         settings: { ...settings, archivedMaxResults: 0 },
     });
 
+    let dossiers = [];
+    if (chatId) {
+        try {
+            dossiers = getActiveDossiers(chatId, chatState?.sceneCard?.participants || []);
+        } catch { /* fail-open */ }
+    }
+
     const memoryBlock = formatMemoryBlock({
         episodes: selected.episodes,
+        dossiers,
         maxChars: Number(settings.maxInjectedChars) || 4000,
         sceneCard: selected.sceneCard,
         format: settings.memoryFormat || 'text',

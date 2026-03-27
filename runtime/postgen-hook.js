@@ -1,7 +1,8 @@
 import { getContext } from '../../../../st-context.js';
 import { getSettings } from '../core/settings.js';
-import { getActiveChatId, getChatState, saveChatState } from '../core/storage.js';
+import { getActiveChatId, getChatState, saveChatState, persistNow } from '../core/storage.js';
 import { isMemoryConfigured } from '../core/memory-config.js';
+import { applyCharacterDeltas } from '../core/dossier-store.js';
 import {
     normalizeChatMessages,
     getLatestAssistantMessage,
@@ -69,6 +70,16 @@ export async function processCompletedTurn({
             episodeCandidate: null,
             safeUpdates: [],
         };
+    }
+
+    if (sceneUpdate.characters?.length > 0) {
+        try {
+            applyCharacterDeltas(chatId, sceneUpdate.characters, {
+                messageId: finalAssistantMessage.id,
+            });
+        } catch (err) {
+            console.warn('[AnchorMemory] Dossier update failed:', err?.message);
+        }
     }
 
     const nextSceneCard = mergeSceneCard(
@@ -140,6 +151,13 @@ export async function processCompletedTurn({
     }
 
     saveChatState(chatId, nextState);
+
+    if (episodeCandidate) {
+        Promise.all([
+            persistNow(chatId, 'state'),
+            sceneUpdate.characters?.length > 0 ? persistNow(chatId, 'dossiers') : null,
+        ]).catch(() => { /* fail-open */ });
+    }
 
     return {
         episodeCandidate,

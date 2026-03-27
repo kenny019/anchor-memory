@@ -8,15 +8,18 @@ import { processCompletedTurn } from './postgen-hook.js';
 import { createPromptPayload } from '../integration/prompt-injection.js';
 import { createLLMCaller } from '../llm/api.js';
 import { prepareGenerationMemoryData } from './prepare-memory.js';
+import { computeEffectiveBudget } from '../core/budget.js';
 
 export async function prepareGenerationMemory({
     chatState,
+    chatId = null,
     recentMessages = [],
     allMessages = [],
     settings = {},
 } = {}) {
     return prepareGenerationMemoryData({
         chatState,
+        chatId,
         recentMessages,
         allMessages,
         settings,
@@ -67,12 +70,13 @@ export async function runGenerationInterceptor(chat = [], _contextSize, _abort, 
 
     // Budget-aware: scale maxChars based on chat length as context proxy
     const configuredMax = Number(settings.maxInjectedChars) || 4000;
-    const effectiveMax = chat.length < 30 ? Math.min(configuredMax, 2000) : configuredMax;
+    const effectiveMax = computeEffectiveBudget(chat.length, configuredMax);
     const effectiveSettings = { ...settings, maxInjectedChars: effectiveMax };
 
     try {
         const prepared = await prepareGenerationMemory({
             chatState,
+            chatId,
             recentMessages,
             allMessages: allNormalized,
             settings: effectiveSettings,
