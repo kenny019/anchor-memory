@@ -80,7 +80,10 @@ function formatText({ sceneCard, episodes, dossiers, maxChars }) {
         if (dossierSection.length <= softCap || dossierSection.length <= 200) {
             baseParts.push('', dossierSection);
         } else {
-            baseParts.push('', dossierSection.slice(0, Math.max(200, Math.floor(softCap))));
+            const limit = Math.max(200, Math.floor(softCap));
+            // Truncate at a clean boundary (newline = per-character entry)
+            const cut = dossierSection.lastIndexOf('\n', limit);
+            baseParts.push('', cut > 0 ? dossierSection.slice(0, cut) : dossierSection.slice(0, limit));
         }
     }
 
@@ -109,7 +112,7 @@ function formatText({ sceneCard, episodes, dossiers, maxChars }) {
 
 function formatEpisodeText(episode, index) {
     const tags = episode.tags?.length ? ` [${episode.tags.slice(0, 3).join(', ')}]` : '';
-    const facts = episode.keyFacts?.length ? `\nKey: ${truncate(episode.keyFacts.join('; '), 500)}` : '';
+    const facts = episode.keyFacts?.length ? `\nKey: ${truncate(episode.keyFacts.join('; '), 800)}` : '';
     return `${index + 1}. ${truncate(episode.title, 100)}${tags}\n${truncate(episode.summary, 500)}${facts}`;
 }
 
@@ -167,7 +170,7 @@ function formatEpisodeXml(episode) {
     const tags = episode.tags?.length ? ` tags="${escXml(episode.tags.slice(0, 3).join(', '))}"` : '';
     const title = `<title>${escXml(truncate(episode.title, 100))}</title>`;
     const summary = `<summary>${escXml(truncate(episode.summary, 500))}</summary>`;
-    const facts = episode.keyFacts?.length ? `\n<key_facts>${escXml(truncate(episode.keyFacts.join('; '), 500))}</key_facts>` : '';
+    const facts = episode.keyFacts?.length ? `\n<key_facts>${escXml(truncate(episode.keyFacts.join('; '), 800))}</key_facts>` : '';
     return `<event${sig}${tags}>\n${title}\n${summary}${facts}\n</event>`;
 }
 
