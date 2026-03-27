@@ -6,7 +6,7 @@ import { createEpisode } from '../models/episodes.js';
 import { formatMessagesForLLM } from '../writing/format-messages.js';
 
 export const CHUNK_SIZE = 25;
-export const MAX_TOKENS = 500;
+export const MAX_TOKENS = 1000;
 
 export function buildChunkPrompt(messages, chunkIndex, totalChunks) {
     const formatted = formatMessagesForLLM(messages, { totalBudget: 6000, maxMessages: CHUNK_SIZE });
@@ -58,19 +58,48 @@ export async function processChunk(messages, chunkIndex, totalChunks, llmCallFn)
         });
         if (error || !text) return null;
 
-        const match = text.match(/\{[\s\S]*\}/);
-        if (!match) {
-            console.warn(`[AnchorMemory] chunk ${chunkIndex+1}/${totalChunks}: no JSON object found in LLM response:\n`, text);
-            return null;
+        // Extract JSON — try full object first, fall back to truncation repair
+        let jsonStr = text.match(/\{[\s\S]*\}/)?.[0];
+        if (!jsonStr) {
+            // Response may be truncated — grab from first { to end and close open brackets
+            const startIdx = text.indexOf('{');
+            if (startIdx === -1) {
+                console.warn(`[AnchorMemory] chunk ${chunkIndex+1}/${totalChunks}: no JSON found in LLM response:\n`, text);
+                return null;
+            }
+            jsonStr = text.slice(startIdx);
         }
         // Strip trailing commas before ] or } (common LLM JSON mistake)
-        const sanitized = match[0].replace(/,\s*([}\]])/g, '$1');
+        let sanitized = jsonStr.replace(/,\s*([}\]])/g, '$1');
+        // Repair truncated JSON: strip trailing incomplete value, then close open brackets
         let parsed;
         try {
             parsed = JSON.parse(sanitized);
-        } catch (jsonErr) {
-            console.error(`[AnchorMemory] chunk ${chunkIndex+1}/${totalChunks}: JSON parse failed: ${jsonErr.message}\n--- raw LLM text ---\n${text}\n--- extracted JSON ---\n${sanitized}`);
-            return null;
+        } catch {
+            // Remove any trailing partial string/value (e.g. `"Repe`)
+            sanitized = sanitized.replace(/,?\s*"[^"]*$/, '');
+            // Close unclosed brackets/braces
+            const opens = [];
+            let inStr = false;
+            let esc = false;
+            for (const ch of sanitized) {
+                if (esc) { esc = false; continue; }
+                if (ch === '\\' && inStr) { esc = true; continue; }
+                if (ch === '"') { inStr = !inStr; continue; }
+                if (inStr) continue;
+                if (ch === '{' || ch === '[') opens.push(ch);
+                else if (ch === '}' || ch === ']') opens.pop();
+            }
+            while (opens.length) {
+                sanitized += opens.pop() === '{' ? '}' : ']';
+            }
+            try {
+                parsed = JSON.parse(sanitized);
+                console.warn(`[AnchorMemory] chunk ${chunkIndex+1}/${totalChunks}: repaired truncated JSON`);
+            } catch (jsonErr) {
+                console.error(`[AnchorMemory] chunk ${chunkIndex+1}/${totalChunks}: JSON parse failed: ${jsonErr.message}\n--- raw LLM text ---\n${text}\n--- sanitized ---\n${sanitized}`);
+                return null;
+            }
         }
 
         const ep = parsed.episode || {};
