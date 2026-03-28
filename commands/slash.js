@@ -93,6 +93,13 @@ export function registerSlashCommands() {
         helpString: 'Bulk-backfill chat history into Anchor Memory. Resets existing state.',
         returns: '',
     }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'am-eval',
+        callback: async () => { const r = formatEvalSnapshot(); showDialog('Anchor Memory - Retrieval Eval', r); return r; },
+        helpString: 'Show the scoring breakdown from the last retrieval pipeline run.',
+        returns: 'eval snapshot text',
+    }));
 }
 
 function formatStatus() {
@@ -245,4 +252,73 @@ function resetMemory() {
     });
     clearExtensionPrompt();
     return `Reset Anchor Memory for chat "${chatId}".`;
+}
+
+function formatEvalSnapshot() {
+    const snapshot = getRetrievalSnapshot();
+    if (!snapshot) return 'No retrieval snapshot available. Send a message first.';
+
+    const meta = snapshot.pipelineMetadata;
+    if (!meta) return 'No scoring data. Last retrieval predates eval logging.';
+
+    const lines = [];
+
+    // Pipeline summary
+    lines.push('=== Pipeline Summary ===');
+    lines.push(`Timestamp: ${new Date(meta.timestamp).toLocaleTimeString()}`);
+    lines.push(`Query refined: ${meta.queryRefined ? 'YES' : 'no'}`);
+    if (meta.queryRefined) {
+        lines.push(`  Original terms: ${meta.originalTerms.slice(0, 15).join(', ')}`);
+        lines.push(`  Refined terms: ${meta.refinedTerms.slice(0, 15).join(', ')}`);
+    } else {
+        lines.push(`  Terms: ${meta.originalTerms.slice(0, 15).join(', ')}`);
+    }
+    lines.push(`Candidates: ${meta.candidateCount}`);
+    lines.push(`Keyword: ${meta.keywordCandidates} scored`);
+    if (meta.llmRerankUsed) {
+        lines.push(`Rerank: ${meta.rerankCandidates} scored${meta.rerankFellBack ? ' (FALLBACK to keyword)' : ''}`);
+    } else {
+        lines.push('Rerank: skipped');
+    }
+    lines.push(`Deep: ${meta.deepRetrieveUsed ? `${meta.deepCandidates} scored (blended 0.3×kw + 0.7×deep)` : 'skipped'}`);
+    lines.push('');
+
+    // Episode scoring table
+    const traces = snapshot.scoringTraces || [];
+    if (traces.length === 0) {
+        lines.push('No episodes scored.');
+        return lines.join('\n');
+    }
+
+    lines.push('=== Episode Scores ===');
+    lines.push('');
+
+    const sorted = [...traces].sort((a, b) => {
+        if (a.selected !== b.selected) return a.selected ? -1 : 1;
+        const aScore = a.passes.deep?.score ?? a.passes.rerank?.score ?? a.passes.keyword?.score ?? 0;
+        const bScore = b.passes.deep?.score ?? b.passes.rerank?.score ?? b.passes.keyword?.score ?? 0;
+        return bScore - aScore;
+    });
+
+    for (const trace of sorted) {
+        const marker = trace.selected ? '[SELECTED]' : '[skipped]';
+        lines.push(`${marker} ${trace.episodeTitle} (${trace.span})`);
+        if (trace.passes.keyword) {
+            lines.push(`  Keyword:  score=${trace.passes.keyword.score.toFixed(1)}  rank=#${trace.passes.keyword.rank + 1}  [${trace.passes.keyword.reasons.join(', ')}]`);
+        }
+        if (trace.passes.rerank) {
+            const label = meta.rerankFellBack ? 'Rerank(fb)' : 'Rerank';
+            lines.push(`  ${label}: score=${trace.passes.rerank.score.toFixed(1)}  rank=#${trace.passes.rerank.rank + 1}  [${trace.passes.rerank.reasons.join(', ')}]`);
+        }
+        if (trace.passes.deep) {
+            lines.push(`  Deep(bl): score=${trace.passes.deep.score.toFixed(1)}  rank=#${trace.passes.deep.rank + 1}  [${trace.passes.deep.reasons.join(', ')}]`);
+        }
+        lines.push('');
+    }
+
+    lines.push('=== Injection ===');
+    lines.push(`Chars: ${snapshot.injectedChars}`);
+    lines.push(`Episodes: ${snapshot.selectedEpisodes?.length || 0}`);
+
+    return lines.join('\n');
 }

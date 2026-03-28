@@ -113,6 +113,11 @@ function bindUi() {
             unregisterMemoryTool();
         }
     });
+
+    $('#am_debug_retrieval_logging').prop('checked', settings.debugRetrievalLogging);
+    $('#am_debug_retrieval_logging').off('change').on('change', function () {
+        updateSettings({ debugRetrievalLogging: $(this).prop('checked') });
+    });
 }
 
 function bindRuntimeEvents() {

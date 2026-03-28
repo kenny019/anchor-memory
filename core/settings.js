@@ -45,6 +45,9 @@ const DEFAULT_SETTINGS = {
     archivedScorePenalty: 0.5,
     archivedMaxResults: 2,
     storageMaxArchived: 200,
+
+    // Debug
+    debugRetrievalLogging: false,
 };
 
 const DEPRECATED_SETTINGS = [

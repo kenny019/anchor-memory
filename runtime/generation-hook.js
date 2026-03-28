@@ -82,6 +82,7 @@ export async function runGenerationInterceptor(chat = [], _contextSize, _abort, 
             settings: effectiveSettings,
         });
         const memoryBlock = prepared.memoryBlock;
+        const evalData = prepared.evalData || null;
 
         const prompt = createPromptPayload(memoryBlock, settings);
         const queryText = recentMessages.map(message => message.text).join('\n').slice(0, 1000);
@@ -93,7 +94,12 @@ export async function runGenerationInterceptor(chat = [], _contextSize, _abort, 
                 queryText,
                 selectedEpisodes: [],
                 selectedSceneLines: [],
+                scoringTraces: evalData?.scoringTraces || [],
+                pipelineMetadata: evalData?.pipelineMetadata || null,
             });
+            if (settings.debugRetrievalLogging) {
+                console.info('[AnchorMemory] Retrieval eval: no memory block produced');
+            }
             return;
         }
 
@@ -108,7 +114,22 @@ export async function runGenerationInterceptor(chat = [], _contextSize, _abort, 
                 span: `${episode.messageStart}-${episode.messageEnd}`,
             })),
             selectedSceneLines: getSceneSnapshotLines(prepared.selected.sceneCard),
+            scoringTraces: evalData?.scoringTraces || [],
+            pipelineMetadata: evalData?.pipelineMetadata || null,
         });
+        if (settings.debugRetrievalLogging && evalData) {
+            console.groupCollapsed('[AnchorMemory] Retrieval Eval Snapshot');
+            console.log('Pipeline:', evalData.pipelineMetadata);
+            console.table(evalData.scoringTraces.map(t => ({
+                id: t.episodeId.slice(0, 12),
+                title: t.episodeTitle.slice(0, 40),
+                selected: t.selected ? 'YES' : '',
+                kw: t.passes.keyword?.score?.toFixed(1) ?? '-',
+                rr: t.passes.rerank?.score?.toFixed(1) ?? '-',
+                deep: t.passes.deep?.score?.toFixed(1) ?? '-',
+            })));
+            console.groupEnd();
+        }
     } catch (error) {
         console.warn('[AnchorMemory] Generation memory failed:', error?.message || error);
         clearGenerationArtifacts(settings);
