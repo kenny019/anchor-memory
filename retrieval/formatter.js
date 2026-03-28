@@ -17,43 +17,78 @@ export function formatToolResult({
     dossiers = [],
     maxChars = 6000,
 } = {}) {
-    const sections = [];
+    const SEP = '\n\n';
 
-    // Scene
+    // Scene (fixed budget)
     const sceneLines = buildSceneLines(sceneCard);
-    if (sceneLines.length > 0) {
-        sections.push(`## Current Scene\n${sceneLines.join('\n')}`);
-    }
+    const sceneSection = sceneLines.length > 0 ? `## Current Scene\n${sceneLines.join('\n')}` : '';
 
-    // Characters
+    // Characters (budget-capped when episodes exist)
     const charLines = buildDossierLinesText(dossiers);
-    if (charLines.length > 0) {
-        sections.push(`## Characters\n${charLines.join('\n')}`);
-    }
+    const fullCharSection = charLines.length > 0 ? `## Characters\n${charLines.join('\n')}` : '';
 
-    // Episodes
-    if (episodes.length > 0) {
-        const epBlocks = [];
-        for (const [i, ep] of episodes.entries()) {
-            const lines = [`### ${i + 1}. ${ep.title || 'Untitled'}`];
-            const meta = [];
-            if (ep.significance != null) meta.push(`Significance: ${ep.significance}`);
-            if (ep.tags?.length) meta.push(`Tags: ${ep.tags.join(', ')}`);
-            if (meta.length) lines.push(meta.join(' | '));
-            if (ep.summary) lines.push(ep.summary);
-            if (ep.keyFacts?.length) {
-                lines.push('Key Facts:');
-                for (const fact of ep.keyFacts) lines.push(`- ${fact}`);
-            }
-            epBlocks.push(lines.join('\n'));
+    if (!sceneSection && !fullCharSection && episodes.length === 0) return '';
+
+    const sceneLen = sceneSection ? sceneSection.length + SEP.length : 0;
+    const available = maxChars - sceneLen;
+
+    let charSection = fullCharSection;
+    if (fullCharSection && episodes.length > 0) {
+        // Soft-cap dossiers to leave room for episodes
+        const softCap = dossiers.length <= 3 ? available * 0.4 : available * 0.25;
+        if (fullCharSection.length > softCap && fullCharSection.length > 200) {
+            const limit = Math.max(200, Math.floor(softCap));
+            const cut = fullCharSection.lastIndexOf('\n', limit);
+            charSection = cut > 0 ? fullCharSection.slice(0, cut) : fullCharSection.slice(0, limit);
         }
-        sections.push(`## Matched Memories (${episodes.length} result${episodes.length !== 1 ? 's' : ''})\n\n${epBlocks.join('\n\n')}`);
+    } else if (fullCharSection && fullCharSection.length > available) {
+        // No episodes — dossiers get full budget, just respect maxChars
+        const cut = fullCharSection.lastIndexOf('\n', available);
+        charSection = cut > 0 ? fullCharSection.slice(0, cut) : fullCharSection.slice(0, available);
     }
 
-    if (sections.length === 0) return '';
-    const result = sections.join('\n\n');
-    if (result.length > maxChars) return result.slice(0, maxChars);
+    // Build prefix (scene + characters)
+    const prefixParts = [];
+    if (sceneSection) prefixParts.push(sceneSection);
+    if (charSection) prefixParts.push(charSection);
+    const prefix = prefixParts.join(SEP);
+
+    if (episodes.length === 0) return prefix;
+
+    // Episodes: add incrementally until budget exhausted
+    let result = prefix;
+    let episodesJoined = '';
+    let fittedCount = 0;
+    for (const [i, ep] of episodes.entries()) {
+        const epBlock = formatEpisodeToolResult(ep, i);
+        const candidate = episodesJoined ? `${episodesJoined}${SEP}${epBlock}` : epBlock;
+        const count = fittedCount + 1;
+        const header = `## Matched Memories (${count} result${count !== 1 ? 's' : ''})`;
+        const candidateResult = prefix
+            ? `${prefix}${SEP}${header}${SEP}${candidate}`
+            : `${header}${SEP}${candidate}`;
+        if (candidateResult.length > maxChars && episodesJoined) break;
+        if (candidateResult.length > maxChars) break;
+        episodesJoined = candidate;
+        fittedCount = count;
+        result = candidateResult;
+    }
+
     return result;
+}
+
+function formatEpisodeToolResult(ep, index) {
+    const lines = [`### ${index + 1}. ${ep.title || 'Untitled'}`];
+    const meta = [];
+    if (ep.significance != null) meta.push(`Significance: ${ep.significance}`);
+    if (ep.tags?.length) meta.push(`Tags: ${ep.tags.join(', ')}`);
+    if (meta.length) lines.push(meta.join(' | '));
+    if (ep.summary) lines.push(ep.summary);
+    if (ep.keyFacts?.length) {
+        lines.push('Key Facts:');
+        for (const fact of ep.keyFacts) lines.push(`- ${fact}`);
+    }
+    return lines.join('\n');
 }
 
 // --- Text format ---

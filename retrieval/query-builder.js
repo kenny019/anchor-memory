@@ -30,12 +30,14 @@ export function buildQueryContext({
         ...openThreads,
     ].filter(Boolean).join(' ');
 
-    const terms = [...new Set([...tokenize(recentText), ...tokenize(stateText)])];
+    const queryTerms = [...new Set(tokenize(recentText))];
+    const terms = [...new Set([...queryTerms, ...tokenize(stateText)])];
 
     return {
         currentMessageId,
         location: String(normalizedSceneCard.location || ''),
         openThreads,
+        queryTerms,
         recentText,
         sceneParticipants,
         stateText,

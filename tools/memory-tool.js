@@ -55,6 +55,23 @@ export function unregisterMemoryTool() {
     console.info('[AnchorMemory] recall_memory tool unregistered');
 }
 
+/**
+ * Filter dossiers to only those whose name/aliases match query terms.
+ * If no name matches, returns all dossiers (scene/event queries).
+ */
+function filterDossiersByQuery(dossiers, queryTerms) {
+    if (!queryTerms.length || !dossiers.length) return dossiers;
+
+    const matched = dossiers.filter(d => {
+        const names = [d.name, ...(d.aliases || [])]
+            .filter(Boolean)
+            .map(n => n.toLowerCase());
+        return queryTerms.some(term => names.some(n => n.includes(term)));
+    });
+
+    return matched.length > 0 ? matched : dossiers;
+}
+
 async function handleRecallMemory({ query }) {
     const settings = getSettings();
     if (!isMemoryConfigured(settings)) {
@@ -100,6 +117,7 @@ async function handleRecallMemory({ query }) {
     try {
         const currentMessageId = Number(chatState?.lastEpisodeBoundaryMessageId) || 0;
         dossiers = getActiveDossiers(chatId, chatState?.sceneCard?.participants || [], { currentMessageId });
+        dossiers = filterDossiersByQuery(dossiers, queryContext.queryTerms || []);
     } catch { /* fail-open */ }
 
     const result = formatToolResult({
